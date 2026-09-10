@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="zh-CN" data-status="idle" data-master="on" data-motion="on">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZCode 福利助手 · 方向 C 纸面手册</title>
+<!--
+  ============================================================================
+  方向 C · 纸面手册 Paper Manual
+  意图:唯一浅色方向。像一本排版讲究的设备说明书 / 台账:冷白纸面、栅格严谨、
+        页边留白充足。执行结果不显示成 chip,而是盖一枚章,把机器的一次成功
+        变成有分量的事,缓解对自动化的不信任。
+  调色:--paper #F1F2EE(冷调微绿灰,不是米黄/奶油) / --ink #16191D
+        普鲁士蓝 #1B3A6B 是唯一强调色
+        语义 墨绿 #256B4E / 赭黄 #8A6212 / 朱红 #A8331F
+  圆角:0px 全站。唯一例外是印章(它不是界面件,是"物")。
+        层次只靠线宽(1 / 2px 双线)、墨色深浅、留白。无渐变无阴影无圆角卡片。
+  动效:章从 1.7 倍砸下(back.out(2.2));章节线与引导点线依次画出;
+        切页用横向擦除(clip-path);新记录用"荧光笔"扫过;
+        只动 transform / opacity / clip-path
+  ============================================================================
+-->
+<style>
+:root{
+  --paper:#F1F2EE; --paper-2:#F9FAF7; --paper-3:#E7E9E3;
+  --ink:#16191D; --ink-2:#4E545C; --ink-3:#5E646B;
+  --rule:#D5D7D0; --rule-2:#B4B8B0;
+  --prussian:#1B3A6B; --prussian-2:#2C5490;
+  --ok:#256B4E; --warn:#8A6212; --err:#A8331F;
+  --mono:"Consolas","Cascadia Mono",monospace;
+  --ui:"Microsoft YaHei UI","Segoe UI",sans-serif;
+  --lat:"Bahnschrift SemiBold",Bahnschrift,"Segoe UI",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:400 13.5px/1.75 var(--ui);min-height:100dvh}
+.hidden{display:none !important}[hidden]{display:none !important}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.dim{color:var(--ink-3)}.num{font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--prussian);outline-offset:2px}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#C4C7BF}
+::-webkit-scrollbar-track{background:#E7E9E3}
+
+.app{display:grid;grid-template-columns:262px minmax(0,1fr);min-height:100dvh}
+
+/* ============================ 侧栏:目录索引 ============================ */
+.sidebar{border-right:1px solid var(--rule-2);background:var(--paper-2);
+  display:flex;flex-direction:column;padding:24px 0 0}
+.brand{padding:0 26px 20px;border-bottom:2px solid var(--ink)}
+.brand b{display:block;font:600 17px var(--lat);letter-spacing:.09em;text-transform:uppercase}
+.brand i{font-style:normal;font-size:12.5px;color:var(--ink-2);letter-spacing:.04em}
+.tabs{display:flex;flex-direction:column;flex:1;padding:14px 0}
+.tab{display:flex;align-items:baseline;gap:8px;padding:9px 26px 9px 20px;border:0;background:none;
+  cursor:pointer;text-align:left;font-size:13.5px;color:var(--ink-2);position:relative;
+  border-left:3px solid transparent;transition:color .2s,border-color .2s}
+.tab .sec{font:12px var(--mono);color:var(--ink-3);min-width:22px}
+.tab .nm{flex:1}
+.tab .pg{font:11.5px var(--mono);color:var(--ink-3)}
+.tab .dots{flex:1;align-self:center;height:1px;margin:0 7px;
+  background-image:radial-gradient(circle,var(--rule-2) 1px,transparent 1px);background-size:5px 1px;
+  background-repeat:repeat-x;transform-origin:left center}
+.tab:hover{color:var(--ink);background:rgba(27,58,107,.05)}
+.tab:hover .sec{color:var(--prussian)}
+.tab.is-active{color:var(--ink);font-weight:600;border-left-color:var(--prussian);background:rgba(27,58,107,.07)}
+.tab.is-active .sec{color:var(--prussian);font-weight:600}
+.side-foot{padding:14px 26px 18px;border-top:1px solid var(--rule)}
+.side-foot .conn{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2)}
+.side-foot .ink-dot{width:9px;height:9px;background:var(--ok);animation:inkPulse 3s ease-in-out infinite}
+@keyframes inkPulse{0%,100%{opacity:.4}50%{opacity:1}}
+.side-foot .meta{font:11px var(--mono);color:var(--ink-3);margin-top:5px;line-height:1.7}
+
+/* ============================ 主区 ============================ */
+.shell{display:flex;flex-direction:column;min-width:0}
+/* 顶栏:公文头 */
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:20px;
+  padding:14px 40px;background:var(--paper);border-bottom:2px solid var(--ink)}
+.stamp-status{display:flex;align-items:center;gap:10px;min-width:230px}
+.stamp-mark{width:11px;height:11px;background:var(--ink-3);position:relative}
+.stamp-status .txt{display:flex;flex-direction:column;line-height:1.35}
+.stamp-status b{font-size:14px;font-weight:600}
+.stamp-status i{font-style:normal;font-size:12px;color:var(--ink-2)}
+[data-status="waiting"] .stamp-mark{background:var(--prussian)}
+[data-status="running"] .stamp-mark{background:var(--prussian);animation:inkPulse 1.2s ease-in-out infinite}
+[data-status="success"] .stamp-mark{background:var(--ok)}
+[data-status="manual"] .stamp-mark{background:var(--err);animation:inkPulse 1.5s ease-in-out infinite}
+.next{display:flex;flex-direction:column;gap:2px}
+.next .lbl{font:11px var(--mono);color:var(--ink-3);letter-spacing:.1em}
+.next .val{display:flex;align-items:baseline;gap:9px}
+.next b{font:600 19px var(--mono)}
+.next span{font:12.5px var(--mono);color:var(--ink-2)}
+.spacer{flex:1}
+.switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;user-select:none;font-size:13px}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch-box{width:38px;height:20px;border:1.5px solid var(--ink);background:transparent;position:relative}
+.switch-box::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;background:var(--ink-3);
+  transition:transform .22s cubic-bezier(.34,1.4,.64,1),background .22s}
+.switch input:checked + .switch-box{background:var(--prussian);border-color:var(--prussian)}
+.switch input:checked + .switch-box::after{transform:translateX(18px);background:#fff}
+.switch-lbl{color:var(--ink-2)}
+
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 15px;cursor:pointer;
+  background:transparent;border:1.5px solid var(--ink);color:var(--ink);font-size:13px;
+  transition:background .18s,color .18s,transform .12s}
+.btn:hover{background:rgba(22,25,29,.06)}
+.btn:active{transform:translateY(1px)}
+.btn.solid{background:var(--prussian);border-color:var(--prussian);color:#fff;font-weight:600}
+.btn.solid:hover{background:var(--prussian-2)}
+.btn.small{height:26px;padding:0 10px;font-size:12px}
+.btn.danger{border-color:var(--err);color:var(--err)}
+.btn.danger:hover{background:rgba(168,51,31,.08)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.linkbtn{background:none;border:0;padding:0 5px;font-size:12.5px;color:var(--prussian);cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+.linkbtn.danger{color:var(--err)}
+svg.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+main{display:flex;flex-direction:column;gap:34px;padding:30px 40px 80px;max-width:1180px;width:100%}
+.page{display:flex;flex-direction:column;gap:34px}
+
+/* 章节标题:双线 */
+.panel{border-top:3px double var(--ink);padding-top:16px}
+.panel.danger{border-top-color:var(--err)}
+.sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.sec-idx{font:600 13.5px var(--ui);letter-spacing:.02em}
+.sec-idx .no{font:12px var(--mono);color:var(--prussian);margin-right:7px}
+.sec-note{font-size:12.5px;color:var(--ink-3);font-style:italic}
+.sec-head .spacer{flex:1}
+.hint{margin:14px 0 0;font-size:12.5px;color:var(--ink-2);line-height:1.85;max-width:70ch}
+h4{margin:16px 0 6px;font:12.5px var(--mono);color:var(--prussian);letter-spacing:.05em}
+
+/* 统计:无卡片,只有竖线分组 */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--rule-2);
+  padding-bottom:22px}
+.card{padding:2px 22px;border-left:1px solid var(--rule-2)}
+.card:first-child{border-left:0;padding-left:0}
+.card-label{font:11.5px var(--mono);letter-spacing:.08em;color:var(--ink-3);margin-bottom:10px}
+.card-val{font:600 30px/1.05 var(--mono);letter-spacing:-.01em;display:flex;align-items:baseline;gap:7px}
+.card-val .u{font-size:13px;font-weight:400;font-family:var(--ui);color:var(--ink-2)}
+.card-sub{margin-top:10px;font-size:12px;color:var(--ink-2)}
+.card-res{display:inline-flex;align-items:baseline;gap:9px}
+.card-res .ok{color:var(--ok)}.card-res .fail{color:var(--err)}
+
+/* 表格:账本,只有横线 */
+.table{width:100%;border-collapse:collapse;font-size:13px}
+.table th{text-align:left;font:600 11.5px var(--ui);letter-spacing:.06em;color:var(--ink-2);
+  padding:0 12px 9px;border-bottom:2px solid var(--ink)}
+.table td{padding:12px;border-bottom:1px dotted var(--rule-2);color:var(--ink-2);vertical-align:middle}
+.table tbody tr:hover{background:rgba(27,58,107,.045)}
+.table td.mono,.table td .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.table td.time{color:var(--ink);font-weight:600}
+.table td:first-child,.table th:first-child{padding-left:0}
+.ta-r{text-align:right}
+.res{font-weight:600}
+.res[data-ok="1"]{color:var(--ok)}.res[data-ok="0"]{color:var(--err)}
+table.rules td[data-kind="ok"]{color:var(--ok);font-weight:600}
+table.rules td[data-kind="fail"]{color:var(--err);font-weight:600}
+table.rules td[data-kind="manual"]{color:var(--warn);font-weight:600}
+
+.row{display:flex;align-items:center;gap:11px}
+.row.wrap{flex-wrap:wrap}
+.dash-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:34px;align-items:start}
+.col{display:flex;flex-direction:column;gap:30px}
+
+.checklist{list-style:none;margin:0;padding:0}
+.checklist li{display:flex;align-items:center;gap:14px;padding:13px 0;border-bottom:1px dotted var(--rule-2)}
+.checklist li:last-child{border-bottom:0}
+.checklist .tick{width:20px;height:20px;flex:0 0 20px;border:1.5px solid var(--rule-2);display:grid;place-items:center}
+.checklist .tick svg{width:12px;height:12px;stroke:#fff;stroke-width:3;fill:none;opacity:0}
+.checklist li[data-done="1"] .tick{background:var(--ok);border-color:var(--ok)}
+.checklist li[data-done="1"] .tick svg{opacity:1}
+.checklist li[data-done="1"] b{text-decoration:line-through;color:var(--ink-3)}
+.checklist div{flex:1;display:flex;flex-direction:column;min-width:0}
+.checklist b{font-size:13.5px;font-weight:600}
+.checklist i{font-style:normal;font-size:12px;color:var(--ink-3)}
+.chip-chip{font:11.5px var(--mono);padding:2px 9px;border:1px solid var(--rule-2);color:var(--ink-2)}
+
+/* 步骤 */
+.steps{display:flex;margin-bottom:18px}
+.step{flex:1;position:relative;padding-top:24px;min-width:0}
+.step::before{content:"";position:absolute;top:9px;left:0;right:0;height:1px;background:var(--rule-2)}
+.step::after{content:"";position:absolute;top:4px;left:0;width:11px;height:11px;border:1.5px solid var(--rule-2);
+  background:var(--paper);transition:background .25s,border-color .25s}
+.step b{display:block;font-size:13px;font-weight:500;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step i{font-style:normal;font-size:11.5px;color:var(--ink-3);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step.is-done::before{background:var(--ok);height:2px;top:8.5px}
+.step.is-done::after{background:var(--ok);border-color:var(--ok)}
+.step.is-done b{color:var(--ink)}
+.step.is-run::after{background:#fff;border-color:var(--prussian);border-width:3px;top:3px}
+.step.is-run b{color:var(--ink);font-weight:600}
+.step.is-fail::after{background:var(--err);border-color:var(--err)}
+.step.is-fail b{color:var(--err)}
+.live-body{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:20px;align-items:start}
+.live-msg{font:12px/1.9 var(--mono);color:var(--ink-2);border:1px solid var(--rule-2);
+  padding:12px 13px;min-height:108px;white-space:pre-wrap;background:var(--paper-2)}
+.live-shot{position:relative;height:152px;border:1px solid var(--ink);overflow:hidden;background:var(--paper-2)}
+.attempt{font:11.5px var(--mono);padding:2px 8px;border:1px solid var(--prussian);color:var(--prussian)}
+
+#execBanner{position:sticky;top:71px;z-index:15;display:flex;align-items:center;gap:10px;padding:10px 40px;
+  font-size:12.5px;color:#6B4C08;background:#F6EFD8;border-bottom:1px solid #DCC98A}
+#execBanner svg{width:14px;height:14px;stroke:var(--warn);fill:none;stroke-width:1.8}
+
+/* 流程 */
+.flow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--ink);background:var(--paper-2)}
+.flow-node{position:relative;padding:14px 12px;border-right:1px solid var(--rule-2);min-height:92px}
+.flow-node:last-child{border-right:0}
+.flow-node i{font-style:normal;font:11px var(--mono);color:var(--prussian);display:block;letter-spacing:.06em}
+.flow-node b{display:block;font-size:13px;font-weight:600;margin:5px 0 4px}
+.flow-node span{font-size:11.5px;color:var(--ink-3);line-height:1.6;display:block}
+.flow-node::after{content:"";position:absolute;right:-5px;top:50%;width:8px;height:8px;background:var(--paper-2);
+  border-top:1px solid var(--ink);border-right:1px solid var(--ink);transform:translateY(-50%) rotate(45deg);z-index:2}
+.flow-node:last-child::after{display:none}
+.flow-node[data-state="done"]{background:rgba(37,107,78,.08)}
+.flow-node[data-state="done"] i{color:var(--ok)}
+.flow-node[data-state="run"]{background:rgba(27,58,107,.1)}
+.flow-node[data-state="run"] i{color:var(--prussian);font-weight:600}
+.flow-node[data-state="fail"]{background:rgba(168,51,31,.09)}
+.flow-node[data-state="fail"] i{color:var(--err)}
+.flow-branches{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:20px}
+.branch{border-left:3px solid var(--rule-2);padding:2px 0 2px 14px;display:flex;flex-direction:column;gap:5px}
+.branch b{font-size:13.5px}
+.branch-cond{font-size:12px;color:var(--ink-3);font-style:italic}
+.branch-act{font-size:12.5px;color:var(--ink-2)}
+.branch[data-kind="ok"]{border-left-color:var(--ok)}.branch[data-kind="ok"] b{color:var(--ok)}
+.branch[data-kind="retry"]{border-left-color:var(--warn)}.branch[data-kind="retry"] b{color:var(--warn)}
+.branch[data-kind="manual"]{border-left-color:var(--err)}.branch[data-kind="manual"] b{color:var(--err)}
+.stages{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 34px}
+.stage{}
+.stage header{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:9px;
+  padding-bottom:8px;border-bottom:1px solid var(--rule-2)}
+.stage header i{font-style:normal;font:12px var(--mono);color:var(--prussian)}
+.stage header b{font-size:13.5px;font-weight:600}
+.stage-tag{margin-left:auto;font:11.5px var(--mono);color:var(--ink-3)}
+.stage ul{margin:0;padding-left:17px;display:flex;flex-direction:column;gap:7px}
+.stage li{font-size:12.5px;color:var(--ink-2);line-height:1.75}
+.stage code{font:11.5px var(--mono);background:var(--paper-3);padding:1px 5px}
+.coord{display:flex;align-items:stretch;gap:20px;flex-wrap:wrap}
+.coord-cell{flex:1;min-width:200px;border-top:1px solid var(--rule-2);padding-top:10px;
+  display:flex;flex-direction:column;gap:6px}
+.coord-cell b{font-size:13px}
+.coord-cell i{font-style:normal;font-size:11.5px;color:var(--ink-3)}
+.coord-cell code{font:12.5px var(--mono);color:var(--prussian)}
+.coord-cell.is-result{border-top:2px solid var(--prussian)}
+.coord-op{display:grid;place-items:center;font:16px var(--mono);color:var(--ink-3)}
+
+.mini-switch{display:inline-flex;cursor:pointer}
+.mini-switch input{position:absolute;opacity:0;width:0;height:0}
+.mini-switch-box{width:32px;height:17px;border:1.5px solid var(--ink-2);position:relative}
+.mini-switch-box::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;background:var(--ink-3);
+  transition:transform .2s,background .2s}
+.mini-switch input:checked + .mini-switch-box{border-color:var(--prussian)}
+.mini-switch input:checked + .mini-switch-box::after{transform:translateX(15px);background:var(--prussian)}
+
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--rule-2)}
+.wk-day{padding:12px 10px;border-right:1px dotted var(--rule-2)}
+.wk-day:last-child{border-right:0}
+.wk-head{display:flex;flex-direction:column;margin-bottom:9px}
+.wk-head b{font:600 12.5px var(--mono)}
+.wk-head span{font-size:11px;color:var(--ink-3)}
+.wk-dots{display:flex;flex-direction:column;gap:5px}
+.wk-dot{display:flex;align-items:center;gap:6px;font:12px var(--mono)}
+.wk-dot::before{content:"";width:6px;height:6px;border:1px solid var(--rule-2)}
+.wk-dot i{font-style:normal;color:var(--ink-2)}
+.wk-dot.done::before{background:var(--ok);border-color:var(--ok)}
+.wk-dot.next::before{background:var(--prussian);border-color:var(--prussian)}
+.wk-dot.next i{color:var(--ink);font-weight:600}
+.wk-dot.off{opacity:.45}
+
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 30px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field.is-wide{grid-column:1/-1}
+.field-label{font-size:12.5px;font-weight:600;color:var(--ink)}
+.field-row{display:flex;align-items:center;gap:9px}
+.field-row input,.field-row select{flex:1;min-width:0;height:33px;padding:0 10px;background:var(--paper-2);
+  border:1px solid var(--rule-2);border-bottom:1.5px solid var(--ink-2);font-size:12.5px;
+  transition:border-color .18s,background .18s}
+.field-row input:focus,.field-row select:focus{border-color:var(--prussian);border-bottom-color:var(--prussian);
+  background:#fff;outline:none}
+.field-row input::placeholder{color:var(--ink-3)}
+.field-hint{margin:0;font-size:11.5px;color:var(--ink-3)}
+.unit{font-size:12px;color:var(--ink-3)}
+.check{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:13px}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.check-box{width:16px;height:16px;flex:0 0 16px;border:1.5px solid var(--ink-2);position:relative}
+.check-box::after{content:"";position:absolute;left:4.5px;top:0.5px;width:4px;height:8.5px;
+  border:2px solid #fff;border-top:0;border-left:0;transform:rotate(42deg) scale(.4);opacity:0;transition:all .18s}
+.check input:checked + .check-box{background:var(--ok);border-color:var(--ok)}
+.check input:checked + .check-box::after{opacity:1;transform:rotate(42deg) scale(1)}
+input[type="range"]{-webkit-appearance:none;appearance:none;height:2px;background:var(--ink-2);flex:1;max-width:210px}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--prussian);
+  cursor:pointer;border:2px solid var(--paper)}
+.readout{font:600 12.5px var(--mono);color:var(--prussian);min-width:36px;text-align:right}
+
+.chips-block{display:flex;flex-direction:column;gap:9px;margin-bottom:18px}
+.chips-label{font:600 11.5px var(--ui);letter-spacing:.06em;color:var(--ink-2)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:25px;padding:0 5px 0 10px;font-size:12.5px;
+  border:1px solid var(--rule-2);background:var(--paper-2)}
+.chip[data-kind="success"]{border-color:var(--ok);color:var(--ok)}
+.chip[data-kind="claimed"]{border-color:var(--warn);color:var(--warn)}
+.chip[data-kind="failure"]{border-color:var(--err);color:var(--err)}
+.chip-x{border:0;background:none;color:inherit;opacity:.6;cursor:pointer;font:14px var(--mono);padding:0 3px}
+.chip-x:hover{opacity:1}
+.chip-input{height:31px;padding:0 10px;background:var(--paper-2);border:1px solid var(--rule-2);
+  border-bottom:1.5px solid var(--ink-2);font-size:12.5px;max-width:320px}
+.chip-input::placeholder{color:var(--ink-3)}
+
+.locate-wrap{position:relative;margin:14px 0;border:1px solid var(--ink);background:var(--paper-2)}
+pre.json{margin:14px 0 0;padding:13px;border:1px solid var(--rule-2);background:var(--paper-3);
+  font:12px/1.75 var(--mono);color:var(--ink);overflow:auto;max-height:260px}
+details summary{cursor:pointer;list-style:none;display:inline-flex}
+details summary::-webkit-details-marker{display:none}
+
+.logs-layout{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:34px;align-items:start}
+.session-list{display:flex;flex-direction:column}
+.sess{display:grid;grid-template-columns:1fr auto;grid-template-areas:"when res" "note note";gap:4px 9px;
+  text-align:left;padding:12px 0;border:0;border-bottom:1px dotted var(--rule-2);background:none;
+  cursor:pointer;color:var(--ink);position:relative}
+.sess::before{content:"";position:absolute;left:-14px;top:0;bottom:0;width:3px;background:transparent}
+.sess.is-active::before{background:var(--prussian)}
+.sess-when{grid-area:when;font-size:13.5px;font-weight:600}
+.sess-res{grid-area:res;font-size:12.5px;font-weight:600}
+.sess-res[data-ok="1"]{color:var(--ok)}.sess-res[data-ok="0"]{color:var(--err)}
+.sess-note{grid-area:note;font-size:12px;color:var(--ink-3)}
+#timeline{display:flex;flex-direction:column;max-height:480px;overflow:auto;padding-right:6px}
+.tl-row{display:grid;grid-template-columns:76px 13px minmax(0,1fr) auto;align-items:center;gap:11px;
+  padding:10px 0;border-bottom:1px dotted var(--rule-2)}
+.tl-t{font:12px var(--mono);color:var(--ink-3)}
+.tl-dot{width:8px;height:8px;border:1px solid var(--rule-2)}
+.tl-row[data-res="ok"] .tl-dot{background:var(--ok);border-color:var(--ok)}
+.tl-row[data-res="fail"] .tl-dot{background:var(--err);border-color:var(--err)}
+.tl-row[data-res="warn"] .tl-dot{background:var(--warn);border-color:var(--warn)}
+.tl-msg{font-size:13px;color:var(--ink-2)}
+.tl-note{font-style:normal;font-size:11.5px;color:var(--ink-3);margin-left:7px}
+.tl-mark{display:flex;align-items:center;gap:13px;padding:11px 0}
+.tl-mark b{font:600 12.5px var(--mono);color:var(--prussian);white-space:nowrap}
+.tl-mark[data-ok="1"] b{color:var(--ok)}
+.tl-line{flex:1;height:1px;background:var(--rule-2)}
+.tl-shot .shot.is-small{width:134px}
+.live-log{max-height:310px;overflow:auto;font:12px/1.9 var(--mono);border:1px solid var(--rule-2);
+  background:var(--paper-2);padding:11px 13px;position:relative}
+/* 荧光笔:新行扫过 */
+.hl{position:absolute;left:0;width:100%;height:19px;background:rgba(138,98,18,.22);pointer-events:none}
+.logline{display:grid;grid-template-columns:70px 52px minmax(0,1fr);gap:10px;position:relative}
+.logline-t{color:var(--ink-3)}
+.logline-src{color:var(--prussian);font-weight:600}
+.logline-msg{color:var(--ink-2);word-break:break-all}
+.logline[data-level="muted"] .logline-msg{color:var(--ink-3)}
+.logline[data-level="action"] .logline-msg{color:var(--prussian-2)}
+.logline[data-level="ok"] .logline-msg{color:var(--ok)}
+.logline[data-level="warn"] .logline-msg{color:var(--warn)}
+.logline[data-level="err"] .logline-msg{color:var(--err)}
+
+/* 截图占位 */
+.shot{position:relative;margin:0;display:flex;flex-direction:column;gap:7px}
+.shot-canvas{position:relative;display:block;height:152px;overflow:hidden;background:var(--paper-3);
+  border:1px solid var(--rule-2)}
+.shot-grid{position:absolute;inset:0;opacity:.55;
+  background-image:linear-gradient(#00000012 1px,transparent 1px),linear-gradient(90deg,#00000012 1px,transparent 1px);
+  background-size:16px 16px}
+.shot-win{position:absolute;left:12%;top:16%;right:12%;bottom:14%;background:#fff;border:1px solid var(--rule-2)}
+.shot-winbar{position:absolute;left:0;top:0;right:0;height:13px;background:var(--paper-3);border-bottom:1px solid var(--rule-2)}
+.shot-box{position:absolute;left:26%;top:44%;width:44%;height:26%;border:1.5px solid var(--err)}
+.shot[data-kind="verify"] .shot-box{border-color:var(--ok)}
+.shot-cap{position:absolute;left:7px;bottom:7px;font:11px var(--mono);color:var(--ink);
+  background:rgba(249,250,247,.94);border:1px solid var(--rule-2);padding:2px 7px}
+.shot-meta{font-size:11.5px;color:var(--ink-3)}
+.shot.is-small .shot-canvas{height:60px}
+.shot.is-small .shot-cap{font-size:9px;left:3px;bottom:3px;padding:1px 4px}
+#liveShot .shot{position:absolute;inset:0}
+#liveShot .shot-canvas{height:100%;border:0}
+#liveShot .shot-meta{display:none}
+.locate-wrap .shot .shot-canvas{height:370px;border:0}
+
+#toasts{position:fixed;top:20px;right:20px;z-index:80;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{min-width:230px;max-width:350px;padding:12px 15px;background:#fff;border:1px solid var(--ink);
+  border-left:4px solid var(--prussian);font-size:12.5px;color:var(--ink)}
+.toast[data-kind="ok"]{border-left-color:var(--ok)}
+.toast[data-kind="warn"]{border-left-color:var(--warn)}
+.toast[data-kind="err"]{border-left-color:var(--err)}
+
+.demobar{position:fixed;right:20px;bottom:20px;z-index:70;display:flex;align-items:center;gap:7px;
+  padding:8px 11px;background:rgba(249,250,247,.95);border:1px dashed var(--ink-2);opacity:.5;transition:opacity .2s}
+.demobar:hover{opacity:1}
+.demobar-toggle{display:none;font:600 11px var(--mono);letter-spacing:.06em;color:var(--ink-2);padding:0 2px}
+.demobar.is-collapsed{opacity:.45;padding:7px 10px}
+.demobar.is-collapsed>*{display:none}
+.demobar.is-collapsed .demobar-toggle{display:inline}
+.demobar-tag{font:10.5px var(--mono);letter-spacing:.1em;color:var(--ink-3);padding-right:3px}
+.demobar button{height:25px;padding:0 10px;background:none;border:1px solid var(--rule-2);color:var(--ink-2);
+  font-size:11.5px;cursor:pointer}
+.demobar button:hover{border-color:var(--prussian);color:var(--prussian)}
+.demobar-sep{width:1px;height:16px;background:var(--rule-2);margin:0 2px}
+
+.foot{margin-top:auto;padding:16px 40px 24px;border-top:1px solid var(--rule-2);font:11.5px var(--mono);
+  color:var(--ink-3);display:flex;justify-content:space-between;flex-wrap:wrap;gap:9px}
+
+/* ======================== 签名元素 · 印章 ========================
+   印章印在面板标题旁,不覆盖任何正文:盖章的仪式感来自"砸下"的动效,
+   而不是压住别人的字。 */
+.seal{display:inline-grid;place-items:center;pointer-events:none;flex:0 0 auto;
+  transform:rotate(-7deg);opacity:.94;mix-blend-mode:multiply;position:relative}
+.seal::before{content:"";position:absolute;inset:-1px;border-radius:inherit;
+  border:1px solid currentColor;opacity:.45}
+.seal-round{width:60px;height:60px;border-radius:50%;border:2.5px solid var(--ok);color:var(--ok);
+  box-shadow:inset 0 0 0 1.5px var(--ok)}
+.seal-round b{font:600 12.5px var(--ui);letter-spacing:.04em;white-space:nowrap;line-height:1}
+.seal-square{width:74px;height:60px;border:2.5px solid var(--err);color:var(--err);
+  box-shadow:inset 0 0 0 1.5px var(--err);text-align:center;border-radius:3px}
+.seal-square b{display:block;font:600 12.5px var(--ui);line-height:1.25}
+.seal-square i{font-style:normal;font-size:10.5px;display:block;margin-top:2px;opacity:.9}
+.seal-banner{height:30px;padding:0 12px;border:2px solid var(--warn);color:var(--warn);border-radius:3px}
+.seal-banner b{font:600 12.5px var(--ui);letter-spacing:.06em;white-space:nowrap}
+.seal-slot{display:inline-flex;align-items:center}
+.seal-wrap{position:relative}
+
+@media (max-width:1240px){
+  .dash-grid{grid-template-columns:1fr;gap:30px}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 0}
+  .card:nth-child(3){border-left:0;padding-left:0}
+  .stages{grid-template-columns:1fr}
+  .flow{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .flow-node:nth-child(4){border-right:0}
+  .week{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media (max-width:1000px){
+  .app{grid-template-columns:62px minmax(0,1fr)}
+  .brand b,.brand i,.tab .nm,.tab .pg,.tab .dots,.side-foot{display:none}
+  .brand{padding:0 0 14px;text-align:center}
+  .tab{justify-content:center;padding:12px 0;border-left-width:3px}
+  .tab .sec{min-width:0}
+}
+@media (max-width:820px){
+  .logs-layout,.live-body,.form-grid,.flow-branches{grid-template-columns:1fr}
+  main{padding:22px 20px 90px}
+  .topbar{padding:12px 20px}
+  #execBanner{padding:10px 20px}
+  .foot{padding:14px 20px}
+  .week{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001s !important;transition-duration:.001s !important}}
+</style>
+</head>
+<body>
+
+<div id="execBanner" class="hidden">
+  <svg viewBox="0 0 24 24"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+  <span>执行中:请勿让浏览器窗口遮挡 ZCode,可最小化本窗口(自动化会把客户端切到前台)</span>
+</div>
+
+<div class="app">
+  <!-- ============================ 目录 ============================ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <b>ZCode</b>
+      <i>福利助手 · 本地面板</i>
+    </div>
+    <nav class="tabs" aria-label="主导航">
+      <button class="tab is-active" data-page="dashboard" type="button">
+        <span class="sec">§ 1</span><span class="nm">概览</span><span class="dots" aria-hidden="true"></span><span class="pg">01</span></button>
+      <button class="tab" data-page="flow" type="button">
+        <span class="sec">§ 2</span><span class="nm">流程</span><span class="dots" aria-hidden="true"></span><span class="pg">04</span></button>
+      <button class="tab" data-page="schedule" type="button">
+        <span class="sec">§ 3</span><span class="nm">场次表</span><span class="dots" aria-hidden="true"></span><span class="pg">07</span></button>
+      <button class="tab" data-page="vision" type="button">
+        <span class="sec">§ 4</span><span class="nm">识别</span><span class="dots" aria-hidden="true"></span><span class="pg">09</span></button>
+      <button class="tab" data-page="logs" type="button">
+        <span class="sec">§ 5</span><span class="nm">运行日志</span><span class="dots" aria-hidden="true"></span><span class="pg">12</span></button>
+      <button class="tab" data-page="settings" type="button">
+        <span class="sec">§ 6</span><span class="nm">设置</span><span class="dots" aria-hidden="true"></span><span class="pg">15</span></button>
+    </nav>
+    <div class="side-foot">
+      <div class="conn"><span class="ink-dot" aria-hidden="true"></span><span>本地服务已连接</span></div>
+      <div class="meta">127.0.0.1:8760<br />v1.1 · 单机单账号</div>
+    </div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="stamp-status">
+        <span class="stamp-mark" aria-hidden="true"></span>
+        <span class="txt"><b id="statusText">空闲</b><i id="statusSub">自动领取待命</i></span>
+      </div>
+      <div class="next">
+        <span class="lbl">下一场</span>
+        <span class="val"><b id="nextSlot">16:00</b><span id="countdown" class="num">--:--:--</span></span>
+      </div>
+      <div class="spacer"></div>
+      <label class="switch" title="总开关:关闭后定时场次不触发,手动试领仍可用">
+        <input type="checkbox" id="master" checked />
+        <span class="switch-box" aria-hidden="true"></span>
+        <span class="switch-lbl">总开关</span>
+      </label>
+      <button class="btn solid" id="runOnce" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 5l11 7-11 7V5Z"/></svg>试领一次</button>
+    </header>
+
+    <main>
+      <!-- ===================== §1 概览 ===================== -->
+      <section class="page is-active" data-page-panel="dashboard">
+        <div class="cards">
+          <div class="card">
+            <div class="card-label">下场时间</div>
+            <div class="card-val"><span id="cardNextDay">今天</span> <span id="cardNext">16:00</span></div>
+            <div class="card-sub" id="cardNextSub">距现在 --:--:--</div>
+          </div>
+          <div class="card">
+            <div class="card-label">今日场次</div>
+            <div class="card-val"><span id="cardSlots" data-to="3">3</span><span class="u">场</span></div>
+            <div class="card-sub">启用 3 个,明日 3 场</div>
+          </div>
+          <div class="card">
+            <div class="card-label">今日结果</div>
+            <div class="card-val card-res">
+              <span class="ok"><span id="statOk" data-to="2">2</span> 成功</span>
+              <span class="fail"><span id="statFail" data-to="1">1</span> 失败</span>
+            </div>
+            <div class="card-sub">最近一次:成功 · 10:00:03</div>
+          </div>
+          <div class="card">
+            <div class="card-label">运行状态</div>
+            <div class="card-val" id="cardState">空闲</div>
+            <div class="card-sub" id="cardStateSub">总开关已开启,无任务在跑</div>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="col">
+            <div class="panel">
+              <div class="sec-head">
+                <span class="sec-idx"><span class="no">1.1</span>手动测试</span>
+                <span class="sec-note">不进调度,点一下立刻跑一次</span>
+              </div>
+              <div class="row wrap">
+                <button class="btn solid" id="runOncePage" type="button">试领一次(完整流程)</button>
+                <button class="btn" id="runDryPage" type="button">演练一次(不点击、不关客户端)</button>
+              </div>
+              <p class="hint">完整流程:打开或复用 ZCode 客户端 → 置顶窗口后截图 → 视觉识别领取按钮 → 点击 → 校验;未成功则关闭客户端,等 5 秒重开,最多 5 次。演练模式同样先置顶再截图识别,但不移动鼠标、不关闭客户端,适合先验证配置。</p>
+            </div>
+
+            <div class="panel">
+              <div class="sec-head">
+                <span class="sec-idx"><span class="no">1.2</span>上手检查</span>
+                <span class="sec-note">三步开始自动领取</span>
+                <span class="spacer"></span>
+                <span class="chip-chip" id="setupCount">2 / 3</span>
+              </div>
+              <ul class="checklist" id="setupList">
+                <li data-done="1">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>填写 DeepSeek API Key</b><i>识别页 → 模型连接,填完点「连接与额度测试」</i></div>
+                  <button class="btn small" data-goto="vision" type="button">去填写</button>
+                </li>
+                <li data-done="1">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>添加每日场次</b><i>场次表 → 添加场次,例如 10:00 / 16:00</i></div>
+                  <button class="btn small" data-goto="schedule" type="button">去添加</button>
+                </li>
+                <li data-done="0">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>打开总开关</b><i>顶栏右侧开关,开启后到点自动执行</i></div>
+                  <button class="btn small" type="button" data-goto="dashboard">去开启</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="panel hidden seal-wrap" id="livePanel">
+              <div class="sec-head">
+                <span class="sec-idx"><span class="no">1.3</span>本次执行</span>
+                <span class="seal-slot" id="sealSlotLive"></span>
+                <span class="spacer"></span>
+                <span class="attempt hidden" id="liveAttempt"></span>
+              </div>
+              <div class="steps">
+                <div class="step" data-step="0" data-state="idle"><b>打开客户端</b><i>复用运行中的窗口</i></div>
+                <div class="step" data-step="1" data-state="idle"><b>窗口就绪</b><i>1240×860 已置顶</i></div>
+                <div class="step" data-step="2" data-state="idle"><b>截图定位</b><i>视觉模型 ①</i></div>
+                <div class="step" data-step="3" data-state="idle"><b>点击领取</b><i>归一化坐标换算</i></div>
+                <div class="step" data-step="4" data-state="idle"><b>校验结果</b><i>视觉模型 ②</i></div>
+              </div>
+              <div class="live-body">
+                <div class="live-msg" id="liveMsg">等待开始…</div>
+                <div class="live-shot" id="liveShot"></div>
+              </div>
+            </div>
+
+            <div class="panel seal-wrap" id="recentPanel">
+              <div class="sec-head">
+                <span class="sec-idx"><span class="no">1.4</span>最近记录</span>
+                <span class="seal-slot" id="sealSlot"></span>
+                <span class="spacer"></span>
+                <button class="btn small" data-goto="logs" type="button">查看全部</button>
+              </div>
+              <table class="table" id="recentTable">
+                <thead><tr><th>时间</th><th>场次</th><th>结果</th><th>说明</th><th class="ta-r">尝试</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== §2 流程 ===================== -->
+      <section class="page" data-page-panel="flow" hidden>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx"><span class="no">2.1</span>整体流程</span>
+            <span class="sec-note">到点或手动触发后,一次领取的完整生命周期</span>
+            <span class="spacer"></span>
+            <span class="chip-chip" id="flowPhase">空闲</span>
+          </div>
+          <div class="flow" id="flowMain"></div>
+          <div class="flow-branches" id="flowBranches"></div>
+          <p class="hint">执行时上方节点实时高亮:已完成转墨绿、当前步骤转普鲁士蓝、失败转朱红;下方分支会闪一下,表示本次走了哪条路。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">2.2</span>识别逻辑</span>
+            <span class="sec-note">两次模型调用 + 若干本地判定</span></div>
+          <div class="stages" id="flowStages"></div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">2.3</span>判定规则</span>
+            <span class="sec-note">模型给观察,规则做决策</span></div>
+          <table class="table rules" id="rulesTable">
+            <thead><tr><th style="width:80px">阶段</th><th>判据</th><th style="width:230px">动作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="hint">词表与阈值都在「识别」页调整。成功与失败以结果弹窗为主证据,词表只匹配模型给出的结构化字段(keywords / ocr_texts / 按钮文字),不匹配模型的解释性文字。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">2.4</span>坐标换算</span>
+            <span class="sec-note">为什么用归一化坐标</span></div>
+          <div class="coord" id="coordBox"></div>
+          <p class="hint">视觉模型内部会把图缩放到约 800×800 等效,像素坐标含义不确定,所以统一用「相对整图的 0~1 比例」;normalize_box() 还兼容模型偶尔返回百分比或像素值的情况。</p>
+        </div>
+      </section>
+
+      <!-- ===================== §3 场次表 ===================== -->
+      <section class="page" data-page-panel="schedule" hidden>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx"><span class="no">3.1</span>每日固定场次</span>
+            <span class="spacer"></span>
+            <button class="btn small" type="button">添加场次</button>
+          </div>
+          <table class="table" id="slotTable">
+            <thead><tr><th style="width:56px">启用</th><th style="width:100px">时间</th>
+              <th style="width:150px">尝试次数</th><th style="width:160px">重试间隔</th><th>最近结果</th><th style="width:110px"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="hint">「尝试次数 / 重试间隔」留空表示继承全局默认(设置页);修改后立即保存并生效,无需重启。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">3.2</span>未来 7 天预览</span></div>
+          <div class="week" id="weekPreview"></div>
+        </div>
+      </section>
+
+      <!-- ===================== §4 识别 ===================== -->
+      <section class="page" data-page-panel="vision" hidden>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">4.1</span>模型连接</span>
+            <span class="spacer"></span><button class="btn small" type="button">连接与额度测试</button></div>
+          <div class="form-grid">
+            <div class="field"><label class="field-label">Provider</label><div class="field-row"><select>
+              <option>deepseek(默认)</option><option>zhipu(备选)</option><option>dashscope(备选)</option><option>custom(自建)</option>
+            </select></div></div>
+            <div class="field"><label class="field-label">base_url</label><div class="field-row">
+              <input type="text" value="https://api.deepseek.com" /></div></div>
+            <div class="field is-wide"><label class="field-label">API Key</label>
+              <div class="field-row"><input type="text" value="sk-••••••••••••••••••••7f3a" />
+                <button class="btn small" type="button">显示</button></div>
+              <p class="field-hint">Key 只保存在本机 data/config.yaml,不会上传到任何第三方。</p></div>
+            <div class="field"><label class="field-label">Model</label><div class="field-row">
+              <input type="text" value="deepseek-v4-flash-vision-exp" /></div></div>
+            <div class="field"><label class="field-label">detail</label><div class="field-row"><select>
+              <option>auto(默认)</option><option>high</option><option>original</option><option>low(更快更省)</option>
+            </select></div></div>
+            <div class="field"><label class="field-label">temperature</label><div class="field-row">
+              <input type="range" min="0" max="1" step="0.1" value="0.2" /><span class="readout">0.2</span></div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">4.2</span>识别参数</span></div>
+          <div class="form-grid">
+            <div class="field"><label class="field-label">定位置信度阈值</label><div class="field-row">
+              <input type="range" min="0" max="1" step="0.05" value="0.7" /><span class="readout">0.70</span></div>
+              <p class="field-hint">置信度低于此值时不会点击,记为一次未成功并进入重试流程。</p></div>
+            <div class="field"><label class="field-label">点击后等待校验</label><div class="field-row">
+              <input type="text" value="2.5" /><span class="unit">秒</span></div>
+              <p class="field-hint">结果弹窗要等服务端,建议 2~3 秒。</p></div>
+            <div class="field"><label class="field-label">视觉超时</label><div class="field-row">
+              <input type="text" value="20" /><span class="unit">秒</span></div></div>
+            <div class="field"><label class="field-label">界面渲染等待上限</label><div class="field-row">
+              <input type="text" value="20" /><span class="unit">秒</span></div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">4.3</span>判定词表</span>
+            <span class="sec-note">命中即视为成功、已领或失败</span></div>
+          <div class="chips-block"><div class="chips-label">成功词</div><div class="chips" id="successChips"></div>
+            <input class="chip-input" id="successInput" type="text" placeholder="输入后按回车添加,如:领取成功" /></div>
+          <div class="chips-block"><div class="chips-label">已领词</div><div class="chips" id="claimedChips"></div>
+            <input class="chip-input" id="claimedInput" type="text" placeholder="输入后按回车添加,如:明日再来" /></div>
+          <div class="chips-block"><div class="chips-label">失败词</div><div class="chips" id="failureChips"></div>
+            <input class="chip-input" id="failureInput" type="text" placeholder="输入后按回车添加,如:领取失败" /></div>
+        </div>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx"><span class="no">4.4</span>测试识别</span>
+            <span class="sec-note">只跑一次视觉,不会点击</span>
+            <span class="spacer"></span>
+            <div class="row"><select><option>截取 ZCode 窗口</option><option>截取整屏</option></select>
+              <button class="btn small" type="button">开始测试</button></div>
+          </div>
+          <div class="locate-wrap" id="locateImageWrap"></div>
+          <pre class="json" id="locateJson"></pre>
+          <p class="hint">红框由模型返回的 button_box 换算而来,框画错了先确认客户端是否停在福利页,再调阈值与词表。</p>
+        </div>
+        <div class="panel">
+          <details><summary class="sec-idx"><span class="no">4.5</span>识别提示词(只读)</summary>
+            <h4>定位 Prompt</h4>
+            <pre class="json">你是界面元素定位器。只输出 JSON,不要解释。
+{
+  "scene": "welfare_page | login_page | captcha | loading | other",
+  "claimable": true,
+  "already_claimed": false,
+  "button_found": true,
+  "button_box": [x1, y1, x2, y2],   // 归一化 0~1
+  "ocr_texts": ["..."],
+  "confidence": 0.0
+}</pre>
+            <h4>校验 Prompt</h4>
+            <pre class="json">判断点击后是否出现结果弹窗。只输出 JSON。
+{
+  "popup": true,
+  "success": true,
+  "failed": false,
+  "keywords": ["..."],
+  "confidence": 0.0
+}</pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- ===================== §5 运行日志 ===================== -->
+      <section class="page" data-page-panel="logs" hidden>
+        <div class="logs-layout">
+          <div class="panel">
+            <div class="sec-head"><span class="sec-idx"><span class="no">5.1</span>场次记录</span>
+              <span class="spacer"></span><button class="btn small" type="button">刷新</button></div>
+            <div class="session-list" id="sessionList"></div>
+          </div>
+          <div class="panel">
+            <div class="sec-head"><span class="sec-idx"><span class="no">5.2</span>尝试详情</span>
+              <span class="sec-note">逐行动作与截图回放</span></div>
+            <div id="timeline"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx"><span class="no">5.3</span>实时日志</span>
+            <span class="spacer"></span>
+            <div class="row"><input class="chip-input" id="logFilter" type="text" placeholder="过滤关键词" style="max-width:200px" />
+              <button class="btn small" type="button">清屏</button></div></div>
+          <div class="live-log" id="liveLog"></div>
+        </div>
+      </section>
+
+      <!-- ===================== §6 设置 ===================== -->
+      <section class="page" data-page-panel="settings" hidden>
+        <div class="panel"><div class="sec-head"><span class="sec-idx"><span class="no">6.1</span>程序与 ZCode</span></div>
+          <div class="form-grid" id="set-app"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx"><span class="no">6.2</span>重试与节奏</span>
+          <span class="sec-note">全局默认,场次可单独覆盖</span></div>
+          <div class="form-grid" id="set-retry"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx"><span class="no">6.3</span>通知</span></div>
+          <div class="form-grid" id="set-notify"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx"><span class="no">6.4</span>数据</span></div>
+          <div class="form-grid" id="set-data"></div>
+          <p class="hint">数据目录:…\zcode-free\data · 截图与日志按保留天数自动清理。</p></div>
+        <div class="panel danger">
+          <div class="sec-head"><span class="sec-idx"><span class="no">6.5</span>危险区</span>
+            <span class="sec-note">以下操作不可撤销</span></div>
+          <div class="row wrap">
+            <button class="btn danger" type="button">清除全部截图</button>
+            <button class="btn danger" type="button">清空日志</button>
+            <button class="btn danger" type="button">重置配置为默认</button>
+            <button class="btn danger" type="button">退出程序</button>
+          </div>
+          <p class="hint">重置配置会保留已填写的 ZCode 路径与 API Key。退出程序会同时中断正在执行的领取。</p>
+        </div>
+      </section>
+
+      <div class="foot">
+        <span>ZCode 福利助手 · 本地面板 · 127.0.0.1:8760</span>
+        <span id="footPage">第 1 页 / 共 6 页</span>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="../assets/js/vendor/gsap.min.js"></script>
+<script src="_shared/model.js"></script>
+<script src="_shared/kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var G = ZKit.gsap, R = ZKit.reduced, $ = ZKit.$, $$ = ZKit.$$;
+  var PAGE_ORDER = ["dashboard", "flow", "schedule", "vision", "logs", "settings"];
+  var sealNode = null;
+
+  /* 目录的引导点线逐条画出 + 正文段落浮入 */
+  function intro(replay) {
+    if (R || !G) return;
+    var tl = G.timeline({ defaults: { ease: "power2.out" } });
+    tl.fromTo(".brand", { autoAlpha: 0, y: -8 }, { autoAlpha: 1, y: 0, duration: 0.4 }, 0)
+      .fromTo(".tab", { autoAlpha: 0, x: -10 }, { autoAlpha: 1, x: 0, duration: 0.35, stagger: 0.05 }, 0.1)
+      .fromTo(".tab .dots", { scaleX: 0 }, { scaleX: 1, duration: 0.4, stagger: 0.05, ease: "power1.inOut" }, 0.2)
+      .fromTo(".side-foot", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.35 }, 0.45)
+      .fromTo(".topbar > *", { autoAlpha: 0, y: -6 }, { autoAlpha: 1, y: 0, duration: 0.4, stagger: 0.05 }, 0.35)
+      .fromTo('[data-page-panel="dashboard"] > *', { autoAlpha: 0, y: 12 },
+        { autoAlpha: 1, y: 0, duration: 0.45, stagger: 0.06 }, 0.45)
+      .add(function () { countCards(); }, 0.85);
+  }
+
+  function countCards() {
+    ["#cardSlots", "#statOk", "#statFail"].forEach(function (s) {
+      var n = $(s); if (n) ZKit.countTo(n, +n.getAttribute("data-to"), { dur: 0.75 });
+    });
+  }
+
+  /* 翻页:横向擦除 */
+  function pageIn() {
+    var p = $(".page.is-active");
+    if (!p) return;
+    if (R || !G) return;
+    G.fromTo(p, { clipPath: "inset(0 0 0 12%)", autoAlpha: 0.4 },
+      { clipPath: "inset(0 0 0 0%)", autoAlpha: 1, duration: 0.34, ease: "power2.out",
+        clearProps: "clipPath,opacity" });
+    G.fromTo(p.children, { autoAlpha: 0, y: 8 },
+      { autoAlpha: 1, y: 0, duration: 0.36, stagger: 0.035, delay: 0.05,
+        ease: "power2.out", clearProps: "transform" });
+  }
+
+  /* 签名元素 · 盖章:印在标题旁的槽位里,盖不到正文 */
+  function stamp(kind) {
+    var slot = kind === "manual" ? $("#sealSlotLive") : $("#sealSlot");
+    if (!slot) return;
+    if (sealNode && sealNode.parentNode) sealNode.remove();
+    var node = ZKit.el("div", "seal " + (kind === "ok" ? "seal-round" : kind === "fail" ? "seal-square" : "seal-banner"));
+    node.setAttribute("role", "img");
+    node.innerHTML = kind === "ok" ? "<b>领取成功</b>"
+      : kind === "fail" ? "<b>领取失败</b><i>5 次未成</i>" : "<b>需人工处理</b>";
+    node.setAttribute("aria-label", node.textContent);
+    slot.appendChild(node);
+    sealNode = node;
+    if (R || !G) return;
+    // 砸下 + 一次极短的墨点扩散
+    G.fromTo(node, { scale: 1.9, rotation: -2, autoAlpha: 0 },
+      { scale: 1, rotation: -7, autoAlpha: 0.94, duration: 0.5, ease: "back.out(2.2)" });
+    var halo = ZKit.el("span", "seal-halo");
+    halo.style.cssText = "position:absolute;inset:-5px;border-radius:inherit;border:2px solid currentColor;pointer-events:none";
+    node.appendChild(halo);
+    G.fromTo(halo, { scale: 1, autoAlpha: 0.5 }, { scale: 1.6, autoAlpha: 0, duration: 0.5, ease: "power2.out" });
+  }
+
+  function clearSeal() { if (sealNode && sealNode.parentNode) { sealNode.remove(); sealNode = null; } }
+
+  ZKit.boot({
+    intro: intro,
+    pageChange: function (key, prev, initial) {
+      var i = PAGE_ORDER.indexOf(key);
+      var fp = $("#footPage");
+      if (fp) fp.textContent = "第 " + (i + 1) + " 页 / 共 6 页";
+      if (!initial) pageIn();
+    },
+    status: function (key) {
+      var cs = $("#cardState");
+      if (cs) cs.textContent = ZModel.statusText[key].name;
+      var ph = $("#flowPhase");
+      if (ph) ph.textContent = ZModel.statusText[key].name;
+      if (key === "idle" || key === "running") clearSeal();
+      if (key === "manual") stamp("banner");
+      if (key === "running") {
+        $$(".flow-node").forEach(function (n, i) { n.setAttribute("data-state", i === 0 ? "run" : "idle"); });
+      } else if (key === "idle" || key === "manual") {
+        $$(".flow-node").forEach(function (n) { n.setAttribute("data-state", "idle"); });
+      }
+    },
+    step: function (i, st) {
+      var msg = $("#liveMsg");
+      if (msg) {
+        var s = ZModel.steps[i];
+        var mark = st === "done" ? "已完成" : (st === "fail" ? "未通过" : "进行中");
+        msg.textContent = "[" + mark + "] " + s.name + " · " + s.hint;
+      }
+      var node = $('.flow-node[data-node="' + ["open", "open", "shot", "locate", "verify"][i] + '"]');
+      if (node) node.setAttribute("data-state", st === "done" ? "done" : (st === "fail" ? "fail" : (st === "run" ? "run" : "idle")));
+    },
+    shot: function (node, old) {
+      if (R || !G) return;
+      G.fromTo(node, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.35 });
+      if (old) G.to(old, { autoAlpha: 0, duration: 0.25, onComplete: function () { old.remove(); } });
+      return "keep";
+    },
+    countdown: function (text) {
+      // 数字每跳一次极轻的位移,不许弹跳
+      var n = $("#countdown");
+      if (!n || R || !G) return;
+      G.fromTo(n, { y: -1.5 }, { y: 0, duration: 0.14, ease: "power1.out" });
+    },
+    toastIn: function (n) { if (!R && G) G.from(n, { autoAlpha: 0, x: 26, duration: 0.4, ease: "back.out(1.4)" }); },
+    toastOut: function (n) {
+      var done = function () { if (n.parentNode) n.remove(); };
+      if (R || !G) { done(); return; }
+      G.to(n, { autoAlpha: 0, x: 14, duration: 0.18, onComplete: done });
+    },
+    record: function (row) {
+      if (R || !G) return;
+      G.from(row, { autoAlpha: 0, y: -10, duration: 0.4 });
+      // 荧光笔扫过
+      var hl = ZKit.el("span", "hl");
+      hl.style.cssText = "position:absolute;left:0;right:0;height:100%;background:rgba(138,98,18,.22);transform-origin:left center;z-index:-1";
+      row.style.position = "relative";
+      row.appendChild(hl);
+      G.fromTo(hl, { scaleX: 0 }, { scaleX: 1, duration: 0.28, ease: "power1.inOut",
+        onComplete: function () { G.to(hl, { autoAlpha: 0, duration: 0.6, delay: 0.5, onComplete: function () { hl.remove(); } }); } });
+    },
+    log: function (node) {
+      if (R || !G) return;
+      G.from(node, { autoAlpha: 0, duration: 0.22 });
+    },
+    chipAdd: function (node) { if (!R && G) G.from(node, { autoAlpha: 0, scale: 0.85, duration: 0.26 }); },
+    chipRemove: function (chip) {
+      var done = function () { if (chip && chip.parentNode) chip.remove(); };
+      if (R || !G) { done(); return; }
+      G.to(chip, { autoAlpha: 0, duration: 0.16, onComplete: done });
+    },
+    execStart: function () {
+      clearSeal();
+      if (R || !G) return;
+      G.fromTo("#livePanel", { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, duration: 0.45 });
+    },
+    success: function () { stamp("ok"); },
+    attemptFail: function () { /* 第一次尝试失败不盖章,等最终结果 */ },
+    ready: function () { countCards(); }
+  });
+})();
+</script>
+</body>
+</html>

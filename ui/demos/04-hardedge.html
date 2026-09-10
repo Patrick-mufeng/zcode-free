@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="zh-CN" data-status="idle" data-master="on" data-motion="on">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZCode 福利助手 · 方向 D 硬边运维</title>
+<!--
+  ============================================================================
+  方向 D · 硬边运维 Hard Edge
+  意图:把控制台做成一台硬塑料外壳的工业设备。自动化最大的风险是"我以为它
+        在跑,其实它挂了",所以用最不可能被误读的方式表达状态:巨大色块、
+        2px 黑框、硬投影、机械摇杆开关,按下去有"咔"的位移。
+  调色:--paper #FBFBF7 / --ink #0E0E11 / 钴蓝 #2B3BFF(唯一行动色)
+        信号橙 #FF4D2E / 石灰绿 #00A86B / 信号黄 #FFCC00
+  圆角:0px 全站(状态贴纸 2px 例外,模拟裁切)。
+        所有实体 = 2px 实线 + 4px 硬投影(无模糊、无渐变、无半透明)。
+  动效:极短极硬。微交互 .1~.18s,入场 .3s,power4.out / back.out(2)。
+        面板从四边"推进来"(硬切+位移,不用淡入);数字变化用 0.15s 位移翻转;
+        执行中进度条横扫;只动 transform / opacity / clip-path
+  ============================================================================
+-->
+<style>
+:root{
+  --paper:#FBFBF7; --gray:#EFEFE9; --gray-2:#E2E2DA;
+  --ink:#0E0E11; --ink-2:#43434B; --ink-3:#5C5C66;
+  --cobalt:#2434E8; --cobalt-2:#1622C4;
+  --signal:#C62C0E; --signal-bright:#FF4D2E; --lime:#00724B; --sun:#FFCC00;
+  --mono:"Consolas","Cascadia Mono",monospace;
+  --ui:"Segoe UI","Microsoft YaHei UI",sans-serif;
+  --blk:"Arial Black","Segoe UI",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:400 13.5px/1.55 var(--ui);min-height:100dvh}
+.hidden{display:none !important}[hidden]{display:none !important}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.dim{color:var(--ink-3)}.num{font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--cobalt);outline-offset:2px}
+::-webkit-scrollbar{width:12px;height:12px;border-left:2px solid var(--ink)}
+::-webkit-scrollbar-thumb{background:var(--ink)}
+::-webkit-scrollbar-track{background:var(--gray-2)}
+
+.app{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100dvh;gap:2px;background:var(--ink)}
+
+/* ============================ 侧栏 ============================ */
+.sidebar{background:var(--paper);display:flex;flex-direction:column;padding:0}
+.brand{padding:17px 18px 15px;border-bottom:2px solid var(--ink);background:var(--cobalt);color:#fff}
+.brand b{display:block;font:900 20px/1 var(--blk);letter-spacing:-.02em;text-transform:uppercase}
+.brand i{font-style:normal;font-size:12px;letter-spacing:.02em;opacity:.9}
+.tabs{display:flex;flex-direction:column;flex:1;padding:8px}
+.tab{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  height:42px;padding:0 13px;margin-bottom:4px;border:2px solid transparent;background:transparent;
+  cursor:pointer;text-align:left;font:600 13.5px var(--ui);color:var(--ink-2);transition:all .14s}
+.tab .no{font:12px var(--mono);color:var(--ink-3)}
+.tab:hover{border-color:var(--ink);background:var(--gray)}
+.tab.is-active{background:var(--ink);color:#fff;border-color:var(--ink);
+  box-shadow:4px 4px 0 var(--cobalt);margin-left:-6px;padding-left:19px}
+.tab.is-active .no{color:var(--sun)}
+.side-foot{border-top:2px solid var(--ink);padding:12px 14px;background:var(--gray)}
+.side-foot .conn{display:inline-flex;align-items:center;gap:8px;font:600 12px var(--ui);
+  border:2px solid var(--ink);background:var(--paper);padding:4px 9px}
+.side-foot .sq{width:9px;height:9px;background:var(--lime);animation:blink 2.4s steps(2,end) infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.side-foot .meta{font:11.5px var(--mono);color:var(--ink-2);margin-top:8px;line-height:1.65}
+
+/* ============================ 主区 ============================ */
+.shell{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;
+  padding:11px 22px;background:var(--paper);border-bottom:2px solid var(--ink)}
+
+/* 签名元素 · 状态贴纸 */
+.status-sticker{display:flex;flex-direction:column;gap:2px;padding:7px 13px;border:2px solid var(--ink);
+  box-shadow:4px 4px 0 var(--ink);background:var(--gray-2);transform:rotate(-2deg);min-width:196px}
+.status-sticker b{font:900 15px/1.15 var(--blk);letter-spacing:-.01em;text-transform:uppercase}
+.status-sticker i{font-style:normal;font-size:11.5px;line-height:1.3}
+[data-status="idle"] .status-sticker{background:var(--gray-2)}
+[data-status="waiting"] .status-sticker{background:var(--sun)}
+[data-status="running"] .status-sticker{background:var(--cobalt);color:#fff}
+[data-status="running"] .status-sticker{animation:runPulse 1s steps(2,end) infinite}
+[data-status="success"] .status-sticker{background:var(--lime);color:#fff}
+[data-status="manual"] .status-sticker{background:var(--signal);color:#fff}
+@keyframes runPulse{0%,100%{box-shadow:4px 4px 0 var(--ink)}50%{box-shadow:8px 8px 0 var(--ink)}}
+
+.next{display:flex;align-items:center;gap:11px;border:2px solid var(--ink);padding:6px 12px;background:var(--paper)}
+.next .lbl{font:600 11px var(--ui);text-transform:uppercase;letter-spacing:.04em;color:var(--ink-2)}
+.next b{font:700 18px var(--mono)}
+.next .cd{font:700 13px var(--mono);color:var(--cobalt);border-left:2px solid var(--ink);padding-left:11px}
+.spacer{flex:1}
+
+/* 签名元素 · 工业摇杆开关 */
+.rocker{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;font:600 12.5px var(--ui)}
+.rocker input{position:absolute;opacity:0;width:0;height:0}
+.rocker-box{position:relative;width:58px;height:32px;border:2px solid var(--ink);background:var(--ink);display:block}
+.rocker-knob{position:absolute;top:2px;left:2px;width:26px;height:24px;background:var(--gray);
+  border:2px solid var(--ink);box-shadow:2px 2px 0 rgba(0,0,0,.35);transition:transform .16s cubic-bezier(.34,1.6,.64,1),background .16s}
+.rocker-box::after{content:"OFF";position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  font:700 9.5px var(--mono);color:var(--ink-3);letter-spacing:.06em}
+.rocker input:checked + .rocker-box{background:var(--lime)}
+.rocker input:checked + .rocker-box::after{content:"ON";left:7px;right:auto;color:#fff}
+.rocker input:checked + .rocker-box .rocker-knob{transform:translateX(24px);background:#fff}
+
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 15px;cursor:pointer;
+  border:2px solid var(--ink);background:var(--paper);color:var(--ink);font:700 13px var(--ui);
+  box-shadow:3px 3px 0 var(--ink);transition:transform .1s,box-shadow .1s,background .1s}
+.btn:hover{background:var(--gray)}
+.btn:active{transform:translate(3px,3px);box-shadow:0 0 0 var(--ink)}
+.btn.solid{background:var(--cobalt);color:#fff}
+.btn.solid:hover{background:var(--cobalt-2)}
+.btn.small{height:28px;padding:0 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.btn.small:active{transform:translate(2px,2px)}
+.btn.danger{background:var(--signal);color:#fff}
+.btn.danger:hover{background:#E63A1C}
+.btn[disabled]{opacity:.42;cursor:not-allowed;box-shadow:3px 3px 0 var(--ink-3)}
+.linkbtn{background:none;border:0;padding:0 6px;font:700 12px var(--ui);color:var(--cobalt);cursor:pointer;
+  text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.linkbtn.danger{color:var(--signal)}
+svg.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:square;stroke-linejoin:miter}
+
+main{display:flex;flex-direction:column;gap:2px;background:var(--ink);flex:1}
+.page{display:flex;flex-direction:column;gap:2px;background:var(--ink)}
+.panel{background:var(--paper);padding:17px 20px 19px}
+.panel.danger{background:#FFEDEA}
+.sec-head{display:flex;align-items:center;gap:12px;margin-bottom:15px;flex-wrap:wrap}
+.sec-idx{font:900 14px var(--ui);letter-spacing:-.01em;text-transform:uppercase;
+  background:var(--ink);color:#fff;padding:4px 9px}
+.sec-note{font-size:12px;color:var(--ink-2)}
+.sec-head .spacer{flex:1}
+.hint{margin:14px 0 0;font-size:12.5px;color:var(--ink-2);line-height:1.75;max-width:76ch;
+  border-left:4px solid var(--ink);padding-left:12px}
+h4{margin:16px 0 6px;font:900 12px var(--ui);text-transform:uppercase}
+
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;background:var(--ink)}
+.card{background:var(--paper);padding:15px 16px 17px;position:relative}
+.card-label{font:700 11px var(--ui);text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+  margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+.card-val{font:700 30px/1.05 var(--mono);letter-spacing:-.02em;display:flex;align-items:baseline;gap:7px}
+.card-val .u{font:700 13px var(--ui)}
+.card-sub{margin-top:10px;font-size:12px;color:var(--ink-2)}
+.card-res{display:inline-flex;align-items:center;gap:8px;font:700 26px var(--mono)}
+.card-res .badge{display:inline-flex;align-items:center;gap:5px;border:2px solid var(--ink);padding:2px 8px;
+  font:700 15px var(--mono)}
+.card-res .badge.ok{background:var(--lime);color:#fff;border-color:var(--lime)}
+.card-res .badge.fail{background:var(--signal);color:#fff;border-color:var(--signal)}
+
+.table{width:100%;border-collapse:collapse;font-size:13.5px;border:2px solid var(--ink)}
+.table th{text-align:left;font:900 11px var(--ui);text-transform:uppercase;letter-spacing:.05em;
+  background:var(--ink);color:#fff;padding:9px 11px;border-right:2px solid var(--paper)}
+.table th:last-child{border-right:0}
+.table td{padding:11px;border-bottom:2px solid var(--ink);border-right:1.5px solid var(--gray-2);color:var(--ink-2)}
+.table td:last-child{border-right:0}
+.table tbody tr:last-child td{border-bottom:0}
+.table tbody tr:hover td{background:rgba(255,204,0,.22)}
+.table td.mono,.table td .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.table td.time{color:var(--ink);font-weight:700;font-size:15px}
+.ta-r{text-align:right}
+.res{font-weight:700;text-transform:uppercase;font-size:12.5px}
+.res[data-ok="1"]{color:var(--lime)}.res[data-ok="0"]{color:var(--signal)}
+table.rules td[data-kind="ok"]{color:var(--lime);font-weight:700}
+table.rules td[data-kind="fail"]{color:var(--signal);font-weight:700}
+table.rules td[data-kind="manual"]{color:#8A6A00;font-weight:700}
+
+.row{display:flex;align-items:center;gap:11px}
+.row.wrap{flex-wrap:wrap}
+.dash-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:2px;background:var(--ink);align-items:start}
+.col{display:flex;flex-direction:column;gap:2px;background:var(--ink)}
+
+.checklist{list-style:none;margin:0;padding:0}
+.checklist li{display:flex;align-items:center;gap:13px;padding:12px 0;border-bottom:2px solid var(--gray-2)}
+.checklist li:last-child{border-bottom:0}
+.checklist .tick{width:20px;height:20px;flex:0 0 20px;border:2px solid var(--ink);background:var(--gray);display:grid;place-items:center}
+.checklist .tick svg{width:12px;height:12px;stroke:#fff;stroke-width:3.4;fill:none;opacity:0}
+.checklist li[data-done="1"] .tick{background:var(--lime);border-color:var(--lime)}
+.checklist li[data-done="1"] .tick svg{opacity:1}
+.checklist li[data-done="1"] b{text-decoration:line-through;color:var(--ink-3);text-decoration-thickness:2px}
+.checklist div{flex:1;display:flex;flex-direction:column;min-width:0}
+.checklist b{font-size:13.5px;font-weight:700}
+.checklist i{font-style:normal;font-size:12px;color:var(--ink-3)}
+.chip-chip{font:900 11.5px var(--mono);border:2px solid var(--ink);padding:3px 9px;background:var(--sun)}
+
+.steps{display:flex;gap:0;margin-bottom:16px}
+.step{flex:1;position:relative;padding-top:26px;min-width:0}
+.step::before{content:"";position:absolute;top:10px;left:0;right:0;height:3px;background:var(--gray-2)}
+.step::after{content:"";position:absolute;top:3px;left:0;width:15px;height:15px;border:2px solid var(--ink);background:var(--paper)}
+.step b{display:block;font-size:12.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step i{font-style:normal;font-size:11.5px;color:var(--ink-3);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step.is-done::before{background:var(--lime)}
+.step.is-done::after{background:var(--lime);border-color:var(--lime)}
+.step.is-done b{color:var(--ink)}
+.step.is-run::after{background:var(--sun);border-color:var(--ink);box-shadow:0 0 0 3px var(--ink)}
+.step.is-run b{color:var(--ink)}
+.step.is-fail::after{background:var(--signal);border-color:var(--signal)}
+.step.is-fail b{color:var(--signal)}
+.live-body{display:grid;grid-template-columns:minmax(0,1fr) 236px;gap:16px;align-items:start}
+.live-msg{font:12px/1.75 var(--mono);color:var(--ink);border:2px solid var(--ink);background:var(--gray);
+  padding:12px;min-height:106px;white-space:pre-wrap}
+.live-shot{position:relative;height:150px;border:2px solid var(--ink);overflow:hidden;background:var(--gray)}
+.attempt{font:900 11.5px var(--mono);border:2px solid var(--ink);background:var(--signal);color:#fff;padding:3px 9px}
+
+#execBanner{position:sticky;top:68px;z-index:15;display:flex;align-items:center;gap:10px;padding:10px 22px;
+  font:700 12.5px var(--ui);background:var(--sun);border-bottom:2px solid var(--ink)}
+#execBanner svg{width:15px;height:15px;stroke:var(--ink);fill:none;stroke-width:2.4}
+
+.flow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;background:var(--ink)}
+.flow-node{background:var(--paper);padding:13px 11px;min-height:94px;position:relative}
+.flow-node i{font-style:normal;font:700 12px var(--mono);display:block;background:var(--ink);color:#fff;
+  width:24px;text-align:center;margin-bottom:7px}
+.flow-node b{display:block;font-size:13px;font-weight:700;margin-bottom:4px}
+.flow-node span{font-size:11.5px;color:var(--ink-2);line-height:1.5;display:block}
+.flow-node[data-state="done"]{background:var(--lime);color:#fff}
+.flow-node[data-state="done"] i{background:#fff;color:var(--lime)}
+.flow-node[data-state="done"] span{color:rgba(255,255,255,.9)}
+.flow-node[data-state="run"]{background:var(--sun)}
+.flow-node[data-state="run"] i{background:var(--ink);color:var(--sun)}
+.flow-node[data-state="fail"]{background:var(--signal);color:#fff}
+.flow-node[data-state="fail"] i{background:#fff;color:var(--signal)}
+.flow-node[data-state="fail"] span{color:rgba(255,255,255,.9)}
+.flow-branches{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;margin-top:2px;background:var(--ink)}
+.branch{padding:14px;border-left:8px solid var(--ink);display:flex;flex-direction:column;gap:5px;background:var(--paper)}
+.branch b{font:900 13px var(--ui);text-transform:uppercase}
+.branch-cond{font-size:12px;color:var(--ink-3)}
+.branch-act{font-size:12.5px;color:var(--ink-2)}
+.branch[data-kind="ok"]{border-left-color:var(--lime);background:#EAF7F1}
+.branch[data-kind="retry"]{border-left-color:var(--sun);background:#FFF9E3}
+.branch[data-kind="manual"]{border-left-color:var(--signal);background:#FFEDEA}
+.stages{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;background:var(--ink)}
+.stage{background:var(--paper);padding:15px 16px}
+.stage header{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:10px;
+  padding-bottom:9px;border-bottom:3px solid var(--ink)}
+.stage header i{font-style:normal;font:700 12px var(--mono);background:var(--cobalt);color:#fff;padding:2px 6px}
+.stage header b{font-size:13.5px;font-weight:700}
+.stage-tag{margin-left:auto;font:700 11px var(--ui);text-transform:uppercase;color:var(--ink-3)}
+.stage ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.stage li{font-size:12.5px;color:var(--ink-2);line-height:1.7}
+.stage code{font:12px var(--mono);background:var(--gray-2);padding:1px 5px;border:1px solid var(--ink-3)}
+.coord{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:2px;align-items:stretch;background:var(--ink)}
+.coord-cell{background:var(--paper);padding:13px;display:flex;flex-direction:column;gap:6px}
+.coord-cell b{font:900 12.5px var(--ui)}
+.coord-cell i{font-style:normal;font-size:11.5px;color:var(--ink-3)}
+.coord-cell code{font:13px var(--mono);color:var(--cobalt);font-weight:700}
+.coord-cell.is-result{background:var(--sun)}
+.coord-cell.is-result code{color:var(--ink)}
+.coord-op{display:grid;place-items:center;font:900 18px var(--mono);background:var(--ink);color:#fff;padding:0 12px}
+
+.mini-switch{display:inline-flex;cursor:pointer}
+.mini-switch input{position:absolute;opacity:0;width:0;height:0}
+.mini-switch-box{width:34px;height:19px;border:2px solid var(--ink);background:var(--gray-2);position:relative}
+.mini-switch-box::after{content:"";position:absolute;top:1px;left:1px;width:13px;height:13px;background:var(--ink-3);
+  transition:transform .14s steps(2)}
+.mini-switch input:checked + .mini-switch-box{background:var(--lime);border-color:var(--ink)}
+.mini-switch input:checked + .mini-switch-box::after{transform:translateX(15px);background:#fff}
+
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;background:var(--ink)}
+.wk-day{background:var(--paper);padding:11px 10px}
+.wk-head{display:flex;flex-direction:column;margin-bottom:8px;padding-bottom:7px;border-bottom:2px solid var(--ink)}
+.wk-head b{font:700 12.5px var(--mono)}
+.wk-head span{font-size:11px;color:var(--ink-3)}
+.wk-dots{display:flex;flex-direction:column;gap:6px}
+.wk-dot{display:flex;align-items:center;gap:6px;font:12px var(--mono)}
+.wk-dot::before{content:"";width:8px;height:8px;border:2px solid var(--ink);background:var(--paper)}
+.wk-dot i{font-style:normal;color:var(--ink-2)}
+.wk-dot.done::before{background:var(--lime);border-color:var(--lime)}
+.wk-dot.next::before{background:var(--sun)}
+.wk-dot.next i{color:var(--ink);font-weight:700}
+.wk-dot.off{opacity:.45}
+
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 26px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field.is-wide{grid-column:1/-1}
+.field-label{font:900 11.5px var(--ui);text-transform:uppercase;letter-spacing:.04em}
+.field-row{display:flex;align-items:center;gap:9px}
+.field-row input,.field-row select{flex:1;min-width:0;height:34px;padding:0 11px;background:var(--paper);
+  border:2px solid var(--ink);font:12.5px var(--mono);transition:box-shadow .12s}
+.field-row input:focus,.field-row select:focus{outline:none;box-shadow:4px 4px 0 var(--cobalt)}
+.field-row input::placeholder{color:var(--ink-3)}
+.field-hint{margin:0;font-size:11.5px;color:var(--ink-3)}
+.unit{font:700 12px var(--mono);color:var(--ink-2)}
+.check{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:13px;font-weight:600}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.check-box{width:18px;height:18px;flex:0 0 18px;border:2px solid var(--ink);background:var(--paper);position:relative}
+.check-box::after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;
+  border:3px solid #fff;border-top:0;border-left:0;transform:rotate(42deg) scale(.4);opacity:0;transition:all .14s}
+.check input:checked + .check-box{background:var(--lime);border-color:var(--lime)}
+.check input:checked + .check-box::after{opacity:1;transform:rotate(42deg) scale(1)}
+input[type="range"]{-webkit-appearance:none;appearance:none;height:6px;background:var(--gray-2);
+  border:2px solid var(--ink);flex:1;max-width:200px}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:20px;background:var(--cobalt);
+  border:2px solid var(--ink);cursor:pointer;margin-top:-2px}
+.readout{font:900 13px var(--mono);min-width:38px;text-align:right}
+
+.chips-block{display:flex;flex-direction:column;gap:9px;margin-bottom:17px}
+.chips-label{font:900 11.5px var(--ui);text-transform:uppercase;letter-spacing:.05em}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 5px 0 10px;font:700 12.5px var(--ui);
+  border:2px solid var(--ink);background:var(--paper)}
+.chip[data-kind="success"]{background:var(--lime);color:#fff}
+.chip[data-kind="claimed"]{background:var(--sun)}
+.chip[data-kind="failure"]{background:var(--signal);color:#fff}
+.chip-x{border:0;background:none;color:inherit;opacity:.7;cursor:pointer;font:900 15px var(--mono);padding:0 4px}
+.chip-x:hover{opacity:1}
+.chip-input{height:32px;padding:0 11px;background:var(--paper);border:2px solid var(--ink);font:12.5px var(--mono);max-width:330px}
+.chip-input::placeholder{color:var(--ink-3)}
+
+.locate-wrap{position:relative;margin:13px 0;border:2px solid var(--ink);background:var(--gray)}
+pre.json{margin:13px 0 0;padding:13px;border:2px solid var(--ink);background:var(--ink);color:#7CFFB2;
+  font:12px/1.7 var(--mono);overflow:auto;max-height:260px}
+details summary{cursor:pointer;list-style:none;display:inline-flex}
+details summary::-webkit-details-marker{display:none}
+
+.logs-layout{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:2px;background:var(--ink);align-items:start}
+.session-list{display:flex;flex-direction:column;gap:2px;background:var(--ink)}
+.sess{display:grid;grid-template-columns:1fr auto;grid-template-areas:"when res" "note note";gap:4px 9px;
+  text-align:left;padding:12px;border:0;border-left:8px solid var(--ink);background:var(--paper);
+  cursor:pointer;color:var(--ink);transition:background .12s}
+.sess:hover{background:var(--gray)}
+.sess.is-active{background:var(--sun)}
+.sess-when{grid-area:when;font:700 13.5px var(--mono)}
+.sess-res{grid-area:res;font:900 11.5px var(--ui);text-transform:uppercase}
+.sess-res[data-ok="1"]{color:var(--lime)}.sess-res[data-ok="0"]{color:var(--signal)}
+.sess-note{grid-area:note;font-size:12px;color:var(--ink-2)}
+#timeline{display:flex;flex-direction:column;gap:1px;background:var(--gray-2);max-height:480px;overflow:auto}
+.tl-row{display:grid;grid-template-columns:78px 16px minmax(0,1fr) auto;align-items:center;gap:11px;
+  padding:10px 11px;background:var(--paper)}
+.tl-t{font:12px var(--mono);color:var(--ink-2)}
+.tl-dot{width:11px;height:11px;border:2px solid var(--ink);background:var(--gray-2)}
+.tl-row[data-res="ok"] .tl-dot{background:var(--lime)}
+.tl-row[data-res="fail"] .tl-dot{background:var(--signal)}
+.tl-row[data-res="warn"] .tl-dot{background:var(--sun)}
+.tl-msg{font-size:13px;color:var(--ink-2);font-weight:600}
+.tl-note{font-style:normal;font:700 11.5px var(--mono);color:var(--cobalt);margin-left:7px}
+.tl-mark{display:flex;align-items:center;gap:12px;padding:11px;background:var(--ink);color:#fff}
+.tl-mark b{font:900 12px var(--ui);text-transform:uppercase;white-space:nowrap}
+.tl-mark[data-ok="1"] b{color:#7CFFB2}
+.tl-line{flex:1;height:2px;background:rgba(255,255,255,.3)}
+.tl-shot .shot.is-small{width:132px}
+.live-log{max-height:300px;overflow:auto;font:12px/1.85 var(--mono);border:2px solid var(--ink);
+  background:var(--ink);color:#E8E8E2;padding:11px 13px}
+.logline{display:grid;grid-template-columns:70px 52px minmax(0,1fr);gap:10px}
+.logline-t{color:#8A8A94}
+.logline-src{color:#7C9CFF;font-weight:700}
+.logline-msg{color:#D8D8D2;word-break:break-all}
+.logline[data-level="muted"] .logline-msg{color:#9A9AA4}
+.logline[data-level="action"] .logline-msg{color:#9CB4FF}
+.logline[data-level="ok"] .logline-msg{color:#7CFFB2}
+.logline[data-level="warn"] .logline-msg{color:var(--sun)}
+.logline[data-level="err"] .logline-msg{color:#FF9A85}
+
+.shot{position:relative;margin:0;display:flex;flex-direction:column;gap:7px}
+.shot-canvas{position:relative;display:block;height:150px;overflow:hidden;background:var(--gray);border:2px solid var(--ink)}
+.shot-grid{position:absolute;inset:0;opacity:.4;
+  background-image:linear-gradient(var(--ink-3) 1px,transparent 1px),linear-gradient(90deg,var(--ink-3) 1px,transparent 1px);
+  background-size:20px 20px}
+.shot-win{position:absolute;left:12%;top:16%;right:12%;bottom:14%;background:#fff;border:2px solid var(--ink)}
+.shot-winbar{position:absolute;left:0;top:0;right:0;height:14px;background:var(--ink)}
+.shot-box{position:absolute;left:26%;top:44%;width:44%;height:26%;border:3px solid var(--signal-bright);background:rgba(255,77,46,.16)}
+.shot[data-kind="verify"] .shot-box{border-color:var(--lime);background:rgba(0,135,90,.16)}
+.shot-cap{position:absolute;left:7px;bottom:7px;font:700 11px var(--mono);color:#fff;background:var(--ink);padding:2px 8px}
+.shot-meta{font-size:11.5px;color:var(--ink-3)}
+.shot.is-small .shot-canvas{height:58px}
+.shot.is-small .shot-cap{font-size:9px;left:3px;bottom:3px;padding:1px 4px}
+#liveShot .shot{position:absolute;inset:0}
+#liveShot .shot-canvas{height:100%;border:0}
+#liveShot .shot-meta{display:none}
+.locate-wrap .shot .shot-canvas{height:360px;border:0}
+
+#toasts{position:fixed;top:18px;right:18px;z-index:80;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{min-width:238px;max-width:356px;padding:13px 15px;background:var(--paper);border:2px solid var(--ink);
+  box-shadow:5px 5px 0 var(--ink);font-size:13px;font-weight:600;border-left:10px solid var(--cobalt)}
+.toast[data-kind="ok"]{border-left-color:var(--lime)}
+.toast[data-kind="warn"]{border-left-color:var(--sun)}
+.toast[data-kind="err"]{border-left-color:var(--signal)}
+
+.demobar{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;align-items:center;gap:7px;
+  padding:8px 10px;background:var(--paper);border:2px dashed var(--ink-2);opacity:.55;transition:opacity .16s}
+.demobar:hover{opacity:1}
+.demobar-toggle{display:none;font:900 11px var(--ui);letter-spacing:.04em;color:var(--ink-2);padding:0 2px}
+.demobar.is-collapsed{opacity:.45;padding:7px 10px}
+.demobar.is-collapsed>*{display:none}
+.demobar.is-collapsed .demobar-toggle{display:inline}
+.demobar-tag{font:900 10px var(--ui);letter-spacing:.06em;color:var(--ink-3);padding-right:3px}
+.demobar button{height:26px;padding:0 10px;background:var(--paper);border:2px solid var(--ink);
+  font:700 11.5px var(--ui);cursor:pointer;transition:transform .1s}
+.demobar button:hover{background:var(--gray)}
+.demobar button:active{transform:translate(2px,2px)}
+.demobar-sep{width:2px;height:16px;background:var(--ink-3);margin:0 2px}
+
+.foot{background:var(--paper);padding:14px 22px;border-top:2px solid var(--ink);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font:11.5px var(--mono);color:var(--ink-2)}
+
+@media (max-width:1240px){
+  .dash-grid{grid-template-columns:1fr}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stages{grid-template-columns:1fr}
+  .flow{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .coord{grid-template-columns:1fr}
+  .coord-op{padding:8px}
+  .week{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media (max-width:1000px){
+  .app{grid-template-columns:64px minmax(0,1fr)}
+  .brand,.tab .nm,.tab .no,.side-foot{display:none}
+  .tabs{padding:8px 4px}
+  .tab{justify-content:center;padding:0;margin-left:0}
+  .tab.is-active{margin-left:0;padding-left:0;box-shadow:none}
+}
+@media (max-width:820px){
+  .logs-layout,.live-body,.form-grid,.flow-branches{grid-template-columns:1fr}
+  .topbar{padding:10px 14px;gap:10px}
+  .status-sticker{min-width:0}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001s !important;transition-duration:.001s !important}}
+</style>
+</head>
+<body>
+
+<div id="execBanner" class="hidden">
+  <svg viewBox="0 0 24 24"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+  <span>执行中:别让浏览器挡住 ZCode,可以最小化本窗口</span>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><b>ZCode</b><i>福利助手 / 控制台</i></div>
+    <nav class="tabs" aria-label="主导航">
+      <button class="tab is-active" data-page="dashboard" type="button"><span class="nm">概览</span><span class="no">01</span></button>
+      <button class="tab" data-page="flow" type="button"><span class="nm">流程</span><span class="no">02</span></button>
+      <button class="tab" data-page="schedule" type="button"><span class="nm">场次表</span><span class="no">03</span></button>
+      <button class="tab" data-page="vision" type="button"><span class="nm">识别</span><span class="no">04</span></button>
+      <button class="tab" data-page="logs" type="button"><span class="nm">运行日志</span><span class="no">05</span></button>
+      <button class="tab" data-page="settings" type="button"><span class="nm">设置</span><span class="no">06</span></button>
+    </nav>
+    <div class="side-foot">
+      <div class="conn"><span class="sq" aria-hidden="true"></span>服务在线</div>
+      <div class="meta">127.0.0.1:8760<br />v1.1 / 单机单账号</div>
+    </div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="status-sticker" id="statusSticker">
+        <b id="statusText">空闲</b><i id="statusSub">自动领取待命</i>
+      </div>
+      <div class="next">
+        <span class="lbl">下一场</span>
+        <b id="nextSlot">16:00</b>
+        <span class="cd num" id="countdown">--:--:--</span>
+      </div>
+      <div class="spacer"></div>
+      <label class="rocker" title="总开关:关闭后定时场次不触发,手动试领仍可用">
+        <span class="switch-lbl">总开关</span>
+        <input type="checkbox" id="master" checked />
+        <span class="rocker-box" aria-hidden="true"><span class="rocker-knob"></span></span>
+      </label>
+      <button class="btn solid" id="runOnce" type="button">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 5l11 7-11 7V5Z"/></svg>试领一次</button>
+    </header>
+
+    <main>
+      <!-- ===================== 01 概览 ===================== -->
+      <section class="page is-active" data-page-panel="dashboard">
+        <div class="cards">
+          <div class="card">
+            <div class="card-label">下场时间</div>
+            <div class="card-val"><span id="cardNextDay">今天</span> <span id="cardNext">16:00</span></div>
+            <div class="card-sub" id="cardNextSub">距现在 --:--:--</div>
+          </div>
+          <div class="card">
+            <div class="card-label">今日场次</div>
+            <div class="card-val"><span id="cardSlots" data-to="3">3</span><span class="u">场</span></div>
+            <div class="card-sub">启用 3 个 / 明日 3 场</div>
+          </div>
+          <div class="card">
+            <div class="card-label">今日结果</div>
+            <div class="card-val card-res">
+              <span class="badge ok"><span id="statOk" data-to="2">2</span>成</span>
+              <span class="badge fail"><span id="statFail" data-to="1">1</span>败</span>
+            </div>
+            <div class="card-sub">最近一次:成功 · 10:00:03</div>
+          </div>
+          <div class="card">
+            <div class="card-label">运行状态</div>
+            <div class="card-val" id="cardState">空闲</div>
+            <div class="card-sub" id="cardStateSub">总开关 ON / 无任务在跑</div>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <div class="col">
+            <div class="panel">
+              <div class="sec-head">
+                <span class="sec-idx">手动测试</span>
+                <span class="sec-note">不进调度,点一下立刻跑一次</span>
+              </div>
+              <div class="row wrap">
+                <button class="btn solid" id="runOncePage" type="button">试领一次(完整流程)</button>
+                <button class="btn" id="runDryPage" type="button">演练一次(不点击、不关客户端)</button>
+              </div>
+              <p class="hint">完整流程会打开或复用 ZCode 客户端、置顶后截图、视觉识别领取按钮、点击、校验;未成功则关闭客户端,等 5 秒重开,最多 5 次。演练模式同样先置顶再截图识别,但不移动鼠标、不关闭客户端。</p>
+            </div>
+
+            <div class="panel">
+              <div class="sec-head">
+                <span class="sec-idx">上手检查</span>
+                <span class="spacer"></span>
+                <span class="chip-chip" id="setupCount">2 / 3</span>
+              </div>
+              <ul class="checklist" id="setupList">
+                <li data-done="1">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>填写 DeepSeek API Key</b><i>识别页 → 模型连接,填完点「连接与额度测试」</i></div>
+                  <button class="btn small" data-goto="vision" type="button">去填写</button>
+                </li>
+                <li data-done="1">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>添加每日场次</b><i>场次表 → 添加场次,例如 10:00 / 16:00</i></div>
+                  <button class="btn small" data-goto="schedule" type="button">去添加</button>
+                </li>
+                <li data-done="0">
+                  <span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
+                  <div><b>打开总开关</b><i>顶栏右侧摇杆,开启后到点自动执行</i></div>
+                  <button class="btn small" type="button" data-goto="dashboard">去开启</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="panel hidden" id="livePanel">
+              <div class="sec-head">
+                <span class="sec-idx">本次执行</span>
+                <span class="spacer"></span>
+                <span class="attempt hidden" id="liveAttempt"></span>
+              </div>
+              <div class="steps">
+                <div class="step" data-step="0" data-state="idle"><b>打开客户端</b><i>复用运行中的窗口</i></div>
+                <div class="step" data-step="1" data-state="idle"><b>窗口就绪</b><i>1240×860 已置顶</i></div>
+                <div class="step" data-step="2" data-state="idle"><b>截图定位</b><i>视觉模型 ①</i></div>
+                <div class="step" data-step="3" data-state="idle"><b>点击领取</b><i>归一化坐标换算</i></div>
+                <div class="step" data-step="4" data-state="idle"><b>校验结果</b><i>视觉模型 ②</i></div>
+              </div>
+              <div class="live-body">
+                <div class="live-msg" id="liveMsg">等待开始…</div>
+                <div class="live-shot" id="liveShot"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="sec-head">
+                <span class="sec-idx">最近记录</span>
+                <span class="spacer"></span>
+                <button class="btn small" data-goto="logs" type="button">全部日志</button>
+              </div>
+              <table class="table" id="recentTable">
+                <thead><tr><th>时间</th><th>场次</th><th>结果</th><th>说明</th><th class="ta-r">尝试</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== 02 流程 ===================== -->
+      <section class="page" data-page-panel="flow" hidden>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx">整体流程</span>
+            <span class="sec-note">一次领取的完整生命周期</span>
+            <span class="spacer"></span>
+            <span class="chip-chip" id="flowPhase">空闲</span>
+          </div>
+          <div class="flow" id="flowMain"></div>
+          <div class="flow-branches" id="flowBranches"></div>
+          <p class="hint">执行时节点整块变色:已完成变绿、当前步骤变黄、失败变橙;下方分支会闪一下表示本次走了哪条路。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">识别逻辑</span><span class="sec-note">两次模型调用加若干本地判定</span></div>
+          <div class="stages" id="flowStages"></div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">判定规则</span><span class="sec-note">模型给观察,规则做决策</span></div>
+          <table class="table rules" id="rulesTable">
+            <thead><tr><th style="width:80px">阶段</th><th>判据</th><th style="width:230px">动作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">坐标换算</span><span class="sec-note">为什么用归一化坐标</span></div>
+          <div class="coord" id="coordBox"></div>
+          <p class="hint">视觉模型内部会把图缩放到约 800×800 等效,像素坐标含义不确定,所以统一用相对整图的 0~1 比例。</p>
+        </div>
+      </section>
+
+      <!-- ===================== 03 场次表 ===================== -->
+      <section class="page" data-page-panel="schedule" hidden>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx">每日固定场次</span>
+            <span class="spacer"></span>
+            <button class="btn small" type="button">添加场次</button>
+          </div>
+          <table class="table" id="slotTable">
+            <thead><tr><th style="width:56px">启用</th><th style="width:100px">时间</th>
+              <th style="width:150px">尝试次数</th><th style="width:160px">重试间隔</th><th>最近结果</th><th style="width:120px"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="hint">尝试次数与重试间隔留空表示继承全局默认;修改后立即写盘并热重载调度器。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">未来 7 天预览</span></div>
+          <div class="week" id="weekPreview"></div>
+        </div>
+      </section>
+
+      <!-- ===================== 04 识别 ===================== -->
+      <section class="page" data-page-panel="vision" hidden>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">模型连接</span><span class="spacer"></span>
+            <button class="btn small" type="button">连接与额度测试</button></div>
+          <div class="form-grid">
+            <div class="field"><label class="field-label">Provider</label><div class="field-row"><select>
+              <option>deepseek(默认)</option><option>zhipu(备选)</option><option>dashscope(备选)</option><option>custom(自建)</option>
+            </select></div></div>
+            <div class="field"><label class="field-label">base_url</label><div class="field-row">
+              <input type="text" value="https://api.deepseek.com" /></div></div>
+            <div class="field is-wide"><label class="field-label">API Key</label>
+              <div class="field-row"><input type="text" value="sk-••••••••••••••••••••7f3a" />
+                <button class="btn small" type="button">显示</button></div>
+              <p class="field-hint">Key 只保存在本机 data/config.yaml。</p></div>
+            <div class="field"><label class="field-label">Model</label><div class="field-row">
+              <input type="text" value="deepseek-v4-flash-vision-exp" /></div></div>
+            <div class="field"><label class="field-label">detail</label><div class="field-row"><select>
+              <option>auto(默认)</option><option>high</option><option>original</option><option>low(更快更省)</option>
+            </select></div></div>
+            <div class="field"><label class="field-label">temperature</label><div class="field-row">
+              <input type="range" min="0" max="1" step="0.1" value="0.2" /><span class="readout">0.2</span></div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">识别参数</span></div>
+          <div class="form-grid">
+            <div class="field"><label class="field-label">定位置信度阈值</label><div class="field-row">
+              <input type="range" min="0" max="1" step="0.05" value="0.7" /><span class="readout">0.70</span></div>
+              <p class="field-hint">低于此值不点击,记为一次未成功并进入重试。</p></div>
+            <div class="field"><label class="field-label">点击后等待校验</label><div class="field-row">
+              <input type="text" value="2.5" /><span class="unit">s</span></div>
+              <p class="field-hint">结果弹窗要等服务端,建议 2~3 秒。</p></div>
+            <div class="field"><label class="field-label">视觉超时</label><div class="field-row">
+              <input type="text" value="20" /><span class="unit">s</span></div></div>
+            <div class="field"><label class="field-label">界面渲染等待上限</label><div class="field-row">
+              <input type="text" value="20" /><span class="unit">s</span></div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">判定词表</span><span class="sec-note">命中即视为成功、已领或失败</span></div>
+          <div class="chips-block"><div class="chips-label">成功词</div><div class="chips" id="successChips"></div>
+            <input class="chip-input" id="successInput" type="text" placeholder="输入后回车添加,如:领取成功" /></div>
+          <div class="chips-block"><div class="chips-label">已领词</div><div class="chips" id="claimedChips"></div>
+            <input class="chip-input" id="claimedInput" type="text" placeholder="输入后回车添加,如:明日再来" /></div>
+          <div class="chips-block"><div class="chips-label">失败词</div><div class="chips" id="failureChips"></div>
+            <input class="chip-input" id="failureInput" type="text" placeholder="输入后回车添加,如:领取失败" /></div>
+        </div>
+        <div class="panel">
+          <div class="sec-head">
+            <span class="sec-idx">测试识别</span>
+            <span class="sec-note">只跑一次视觉,不会点击</span>
+            <span class="spacer"></span>
+            <div class="row"><select><option>截取 ZCode 窗口</option><option>截取整屏</option></select>
+              <button class="btn small" type="button">开始测试</button></div>
+          </div>
+          <div class="locate-wrap" id="locateImageWrap"></div>
+          <pre class="json" id="locateJson"></pre>
+          <p class="hint">红框来自模型返回的 button_box 换算;框画错了先确认客户端是否停在福利页。</p>
+        </div>
+        <div class="panel">
+          <details><summary class="sec-idx">识别提示词(只读)</summary>
+            <h4>定位 Prompt</h4>
+            <pre class="json">你是界面元素定位器。只输出 JSON,不要解释。
+{
+  "scene": "welfare_page | login_page | captcha | loading | other",
+  "claimable": true,
+  "already_claimed": false,
+  "button_found": true,
+  "button_box": [x1, y1, x2, y2],
+  "ocr_texts": ["..."],
+  "confidence": 0.0
+}</pre>
+            <h4>校验 Prompt</h4>
+            <pre class="json">判断点击后是否出现结果弹窗。只输出 JSON。
+{
+  "popup": true, "success": true, "failed": false,
+  "keywords": ["..."], "confidence": 0.0
+}</pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- ===================== 05 运行日志 ===================== -->
+      <section class="page" data-page-panel="logs" hidden>
+        <div class="logs-layout">
+          <div class="panel">
+            <div class="sec-head"><span class="sec-idx">场次记录</span><span class="spacer"></span>
+              <button class="btn small" type="button">刷新</button></div>
+            <div class="session-list" id="sessionList"></div>
+          </div>
+          <div class="panel">
+            <div class="sec-head"><span class="sec-idx">尝试详情</span><span class="sec-note">逐行动作与截图回放</span></div>
+            <div id="timeline"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><span class="sec-idx">实时日志</span><span class="spacer"></span>
+            <div class="row"><input class="chip-input" id="logFilter" type="text" placeholder="过滤关键词" style="max-width:190px" />
+              <button class="btn small" type="button">清屏</button></div></div>
+          <div class="live-log" id="liveLog"></div>
+        </div>
+      </section>
+
+      <!-- ===================== 06 设置 ===================== -->
+      <section class="page" data-page-panel="settings" hidden>
+        <div class="panel"><div class="sec-head"><span class="sec-idx">程序与 ZCode</span></div>
+          <div class="form-grid" id="set-app"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx">重试与节奏</span>
+          <span class="sec-note">全局默认,场次可单独覆盖</span></div>
+          <div class="form-grid" id="set-retry"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx">通知</span></div>
+          <div class="form-grid" id="set-notify"></div></div>
+        <div class="panel"><div class="sec-head"><span class="sec-idx">数据</span></div>
+          <div class="form-grid" id="set-data"></div></div>
+        <div class="panel danger">
+          <div class="sec-head"><span class="sec-idx">危险区</span><span class="sec-note">以下操作不可撤销</span></div>
+          <div class="row wrap">
+            <button class="btn danger" type="button">清除全部截图</button>
+            <button class="btn danger" type="button">清空日志</button>
+            <button class="btn danger" type="button">重置配置为默认</button>
+            <button class="btn danger" type="button">退出程序</button>
+          </div>
+          <p class="hint">重置配置会保留已填写的 ZCode 路径与 API Key。退出程序会同时中断正在执行的领取。</p>
+        </div>
+      </section>
+
+      <div class="foot">
+        <span>ZCode 福利助手 · 本地服务 127.0.0.1:8760 · 数据不出本机</span>
+        <span class="mono" id="footStatus">STATUS: STANDBY</span>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="../assets/js/vendor/gsap.min.js"></script>
+<script src="_shared/model.js"></script>
+<script src="_shared/kit.js"></script>
+<script>
+(function () {
+  "use strict";
+  var G = ZKit.gsap, R = ZKit.reduced, $ = ZKit.$, $$ = ZKit.$$;
+
+  /* 面板从四边推进来:硬切 + 位移,不用淡入 */
+  function intro(replay) {
+    if (R || !G) return;
+    var tl = G.timeline({ defaults: { ease: "power4.out" } });
+    tl.fromTo(".brand", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.34 }, 0)
+      .fromTo(".tab", { x: -14 }, { x: 0, duration: 0.3, stagger: 0.045 }, 0.1)
+      .fromTo(".side-foot", { y: 20, clipPath: "inset(100% 0 0 0)" },
+        { y: 0, clipPath: "inset(0% 0 0 0)", duration: 0.3 }, 0.3)
+      .fromTo(".status-sticker", { x: -30, clipPath: "inset(0 100% 0 0)" },
+        { x: 0, clipPath: "inset(0 0% 0 0)", duration: 0.36 }, 0.26)
+      .fromTo(".next", { y: -26 }, { y: 0, duration: 0.34 }, 0.3)
+      .fromTo(".rocker", { y: -26 }, { y: 0, duration: 0.34 }, 0.35)
+      .fromTo(".topbar .btn", { x: 30, clipPath: "inset(0 0 0 100%)" },
+        { x: 0, clipPath: "inset(0 0 0 0%)", duration: 0.36 }, 0.4)
+      .fromTo('[data-page-panel="dashboard"] > *', { clipPath: "inset(0 0 100% 0)", y: -10 },
+        { clipPath: "inset(0 0 0% 0)", y: 0, duration: 0.4, stagger: 0.07 }, 0.38)
+      .add(function () { countCards(); }, 0.8);
+  }
+
+  function countCards() {
+    ["#cardSlots", "#statOk", "#statFail"].forEach(function (s) {
+      var n = $(s); if (n) ZKit.countTo(n, +n.getAttribute("data-to"), { dur: 0.6 });
+    });
+  }
+
+  function pageIn() {
+    var p = $(".page.is-active");
+    if (!p || R || !G) return;
+    G.fromTo(p.children, { x: 26, autoAlpha: 0 },
+      { x: 0, autoAlpha: 1, duration: 0.24, stagger: 0.04, ease: "power4.out", clearProps: "transform" });
+  }
+
+  /* 贴纸:先揭起,再拍下 */
+  function stickerBeat() {
+    if (R || !G) return;
+    var n = $("#statusSticker");
+    if (!n) return;
+    G.timeline()
+      .to(n, { y: -6, rotation: -6, duration: 0.11, ease: "power2.out" })
+      .to(n, { y: 0, rotation: -2, duration: 0.3, ease: "back.out(2.4)" });
+  }
+
+  var FOOT = {
+    idle: "STATUS: STANDBY", waiting: "STATUS: ARMED", running: "STATUS: RUNNING",
+    success: "STATUS: SUCCESS", manual: "STATUS: NEEDS MANUAL"
+  };
+
+  ZKit.boot({
+    intro: intro,
+    pageChange: function (key, prev, initial) { if (!initial) pageIn(); },
+    status: function (key) {
+      stickerBeat();
+      var cs = $("#cardState");
+      if (cs) cs.textContent = ZModel.statusText[key].name;
+      var ph = $("#flowPhase");
+      if (ph) ph.textContent = ZModel.statusText[key].name;
+      var fs = $("#footStatus");
+      if (fs) fs.textContent = FOOT[key];
+      if (key === "running") {
+        $$(".flow-node").forEach(function (n, i) { n.setAttribute("data-state", i === 0 ? "run" : "idle"); });
+      } else if (key === "idle" || key === "manual") {
+        $$(".flow-node").forEach(function (n) { n.setAttribute("data-state", "idle"); });
+      }
+    },
+    step: function (i, st) {
+      var msg = $("#liveMsg");
+      if (msg) {
+        var s = ZModel.steps[i];
+        var tag = st === "done" ? "[ OK ]" : (st === "fail" ? "[ NG ]" : "[ .. ]");
+        msg.textContent = tag + " " + s.name + " · " + s.hint;
+      }
+      var node = $('.flow-node[data-node="' + ["open", "open", "shot", "locate", "verify"][i] + '"]');
+      if (node) node.setAttribute("data-state", st === "done" ? "done" : (st === "fail" ? "fail" : (st === "run" ? "run" : "idle")));
+      if (st === "done" && G && !R) {
+        var el = $('.step[data-step="' + i + '"]');
+        if (el) G.fromTo(el, { scale: 1 }, { scale: 1.06, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" });
+      }
+      if (st === "fail" && G && !R) {
+        var f = $('.step[data-step="' + i + '"]');
+        if (f) G.fromTo(f, { x: -3 }, { x: 0, duration: 0.28, ease: "elastic.out(1,.4)" });
+      }
+    },
+    shot: function (node, old) {
+      if (R || !G) return;
+      G.fromTo(node, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.26, ease: "power4.out" });
+      if (old) G.to(old, { autoAlpha: 0, duration: 0.14, onComplete: function () { old.remove(); } });
+      return "keep";
+    },
+    countdown: function (text) {
+      var n = $("#countdown");
+      if (!n || R || !G) return;
+      G.fromTo(n, { y: 5, autoAlpha: 0.4 }, { y: 0, autoAlpha: 1, duration: 0.13, ease: "power2.out" });
+    },
+    toastIn: function (n) { if (!R && G) G.from(n, { x: 40, autoAlpha: 0, duration: 0.28, ease: "power4.out" }); },
+    toastOut: function (n) {
+      var done = function () { if (n.parentNode) n.remove(); };
+      if (R || !G) { done(); return; }
+      G.to(n, { x: 20, autoAlpha: 0, duration: 0.14, onComplete: done });
+    },
+    record: function (row) {
+      if (R || !G) return;
+      G.from(row, { clipPath: "inset(0 0 0 100%)", duration: 0.3, ease: "power4.out" });
+      G.fromTo(row, { backgroundColor: "rgba(255,204,0,.85)" },
+        { backgroundColor: "rgba(255,204,0,0)", duration: 1.5, delay: 0.25 });
+    },
+    log: function (node) { if (!R && G) G.from(node, { x: -10, autoAlpha: 0, duration: 0.16, ease: "power2.out" }); },
+    chipAdd: function (node) { if (!R && G) G.from(node, { scale: 0.7, autoAlpha: 0, duration: 0.22, ease: "back.out(2.2)" }); },
+    chipRemove: function (chip) {
+      var done = function () { if (chip && chip.parentNode) chip.remove(); };
+      if (R || !G) { done(); return; }
+      G.to(chip, { scale: 0.8, autoAlpha: 0, duration: 0.12, onComplete: done });
+    },
+    execStart: function () {
+      if (R || !G) return;
+      G.fromTo("#livePanel", { clipPath: "inset(0 0 0 100%)" },
+        { clipPath: "inset(0 0 0 0%)", duration: 0.32, ease: "power4.out" });
+    },
+    ready: function () { countCards(); }
+  });
+})();
+</script>
+</body>
+</html>

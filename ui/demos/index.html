@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZCode 福利助手 · 前端重做方案选型</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0D0E11;color:#E7E9ED;
+  font:400 14px/1.7 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:44px 28px 90px}
+h1{font:700 26px/1.25 "Segoe UI","Microsoft YaHei UI";margin:0 0 8px;letter-spacing:-.01em}
+.lead{color:#9BA3AD;margin:0 0 30px;max-width:66ch}
+h2{font:600 16px/1.3 inherit;margin:44px 0 14px;padding-bottom:10px;border-bottom:1px solid #24272C}
+.tip{background:#16181C;border:1px solid #262A30;border-left:3px solid #E4A13C;
+  padding:13px 16px;font-size:13px;color:#B9C1CA;margin:0 0 28px}
+.tip b{color:#E7E9ED}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+.opt{background:#15171A;border:1px solid #24272C;border-radius:10px;overflow:hidden;
+  display:flex;flex-direction:column}
+.opt a.shot{display:block;border-bottom:1px solid #24272C;background:#0A0B0D;text-decoration:none}
+.opt img{display:block;width:100%;height:auto}
+.opt-body{padding:15px 17px 18px;flex:1;display:flex;flex-direction:column;gap:9px}
+.opt h3{margin:0;font:600 15.5px/1.35 inherit;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.opt h3 .no{font:600 12px ui-monospace,Consolas,monospace;color:#E4A13C;
+  border:1px solid #3A3427;background:#211D14;border-radius:4px;padding:1px 7px}
+.opt p{margin:0;font-size:13px;color:#A6AEB8}
+.swatches{display:flex;gap:5px;flex-wrap:wrap}
+.sw{width:26px;height:26px;border-radius:5px;border:1px solid rgba(255,255,255,.14)}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px;
+  padding-top:10px;border-top:1px solid #24272C;color:#8E969F}
+.meta dt{margin:0;color:#6F777F}
+.meta dd{margin:0;color:#A6AEB8}
+.actions{display:flex;gap:9px;margin-top:auto;padding-top:13px}
+.actions a{flex:1;text-align:center;text-decoration:none;font-size:13px;font-weight:600;
+  padding:9px 12px;border-radius:7px;border:1px solid #2E333A;color:#E7E9ED;background:#1B1E22}
+.actions a:hover{background:#22262B}
+.actions a.primary{background:#E4A13C;border-color:#E4A13C;color:#231802}
+.actions a.primary:hover{background:#EFA945}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid #24272C;vertical-align:top}
+th{font-size:11.5px;font-weight:600;color:#8E969F;text-transform:uppercase;letter-spacing:.05em}
+td:first-child{color:#E7E9ED;font-weight:600;white-space:nowrap}
+td{color:#A6AEB8}
+code{font:12.5px ui-monospace,Consolas,monospace;background:#1B1E22;padding:2px 6px;border-radius:4px;color:#CFD5DC}
+ul{padding-left:20px;color:#A6AEB8;font-size:13.5px}
+li{margin:5px 0}
+li b{color:#E7E9ED}
+.foot{margin-top:44px;padding-top:18px;border-top:1px solid #24272C;font-size:12.5px;color:#6F777F}
+@media (max-width:560px){.wrap{padding:26px 16px 60px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ZCode 福利助手 · 前端重做方案选型</h1>
+  <p class="lead">5 个设计方向，内容、功能与交互逻辑完全一致，只有视觉语言不同。每个都是可点的真实原型：六个页签都能切、「试领一次」会跑完一整段模拟执行（含一次失败重试）、顶栏倒计时真的在跳。</p>
+
+  <div class="tip">
+    <b>建议这样看：</b>先点开两三个方向的「试领一次」看执行时的动效表现，再切到「运行日志」和「场次表」看数据密集页的排版是否还站得住。右下角的演示控制条可以随时切换状态（空闲 / 执行中 / 成功 / 需人工）。
+  </div>
+
+  <h2>五个方向</h2>
+  <div class="grid" id="grid"></div>
+
+  <h2>横向对比</h2>
+  <table>
+    <thead><tr><th>方向</th><th>视觉语言</th><th>最适合的场景</th><th>代价</th></tr></thead>
+    <tbody>
+      <tr><td>A 极光仪控</td><td>深色玻璃 + 极光光斑 + 轨道环倒计时</td>
+        <td>想要「一台仪器」的仪式感，长时间盯着看不累，深夜环境最耐看</td>
+        <td>玻璃与模糊层最多，低配机上开销略高；深色不适合白天强光下看</td></tr>
+      <tr><td>B 制图台</td><td>深蓝图纸 + 坐标网格 + 尺寸标注 + 等宽字体</td>
+        <td>想强调「点得准、可复查」，把坐标与置信度当成一等公民展示</td>
+        <td>字号整体偏小、信息密度高，年龄偏大的用户会吃力；最「硬核」</td></tr>
+      <tr><td>C 纸面手册</td><td>冷白纸面 + 零圆角 + 双线章节 + 印章</td>
+        <td>白天使用为主，想把它当一本说明书来读；浅色下表格最易读</td>
+        <td>与「自动化」的科技感距离最远；印章动效偏装饰，需要接受</td></tr>
+      <tr><td>D 硬边运维</td><td>纯白机身 + 2px 黑框 + 硬投影 + 机械摇杆</td>
+        <td>最怕「以为它在跑其实挂了」，要在三米外一眼看清状态</td>
+        <td>视觉最吵，长期看容易疲劳；占据空间大，一屏信息量最少</td></tr>
+      <tr><td>E 静默方格</td><td>石墨灰三级底色 + 1px 细线 + 唯一琥珀色 + 24 小时轨道</td>
+        <td>已经用顺手了，想让它常驻桌面、安静不打扰；信息密度最高</td>
+        <td>装饰最少，第一眼不够「惊艳」；需要一点时间才能看出讲究</td></tr>
+    </tbody>
+  </table>
+
+  <h2>共同做对的事</h2>
+  <ul>
+    <li><b>状态一眼可读</b>：五个方向都用同一套语义色（绿=成功、红=失败、黄=等待、蓝或琥珀=进行中），品牌色只用于操作与选中，不参与状态表达。</li>
+    <li><b>执行全程可见</b>：点「试领一次」后，顶栏状态、五步时间线、实时截图、实时日志四处在同一秒同步变化，含一次失败重试的完整过程。</li>
+    <li><b>离线可用</b>：纯静态 HTML/CSS/JS，不引 CDN、不引外链字体，双击就能开；动效只用项目里已经放好的那份 GSAP。</li>
+    <li><b>可访问性达标</b>：正文与次级文字对比度全部 ≥ 4.5:1（已用脚本逐元素实测），焦点环可见，系统「减少动态效果」或地址栏加 <code>?motion=0</code> 时全部静态化且不留透明残骸。</li>
+    <li><b>三档视口可用</b>：1440 设计基准，1100 侧栏收窄，760 单列；三个宽度下都没有横向滚动条。</li>
+  </ul>
+
+  <h2>选定之后</h2>
+  <ul>
+    <li>把这一个方向的 CSS 拆成 <code>ui/assets/css/app.css</code>，页面骨架合回 <code>ui/index.html</code>，然后按现有 <code>api.js / events.js</code> 的真实接口替换掉演示数据（进度见下方文件清单）。</li>
+    <li>演示里已经在用的类名（<code>.logline[data-level]</code>、<code>.chip[data-kind]</code>、<code>.shot[data-kind]</code>、<code>.step[data-state]</code>）就是给正式版准备的接口，接真实数据时不用重新设计。</li>
+    <li>没选中的四个方向不必删，可以留着作为后续换肤或「紧凑模式」的备选。</li>
+  </ul>
+
+  <h2>文件清单</h2>
+  <table>
+    <thead><tr><th>路径</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>ui/demos/01-aurora.html</td><td>方向 A · 极光仪控（自包含，双击可开）</td></tr>
+      <tr><td>ui/demos/02-blueprint.html</td><td>方向 B · 制图台</td></tr>
+      <tr><td>ui/demos/03-manual.html</td><td>方向 C · 纸面手册</td></tr>
+      <tr><td>ui/demos/04-hardedge.html</td><td>方向 D · 硬边运维</td></tr>
+      <tr><td>ui/demos/05-quiet.html</td><td>方向 E · 静默方格</td></tr>
+      <tr><td>ui/demos/_shared/model.js</td><td>五版共用的内容模型（场次、步骤、日志、设置项等）</td></tr>
+      <tr><td>ui/demos/_shared/kit.js</td><td>五版共用的行为与动效底座（页签、倒计时、执行剧本、控制条）</td></tr>
+      <tr><td>ui/demos/_design/BRIEF.md</td><td>共享简报：产品定位、硬约束、内容模型、验收标准</td></tr>
+      <tr><td>ui/demos/_design/spec-A~E.md</td><td>五个方向的完整视觉规范（调色板、字体尺度、圆角规则、动效基调、禁止项）</td></tr>
+      <tr><td>ui/demos/_design/cdp.mjs</td><td>无依赖的 headless Chrome 驱动：截图、跑交互、抓控制台报错</td></tr>
+      <tr><td>ui/demos/_design/audit.mjs</td><td>无依赖的视觉审计：截断文字、元素重叠、对比度、过小字号、空白页</td></tr>
+    </tbody>
+  </table>
+
+  <div class="foot">ZCode 福利助手 · 前端重做方案 · 5 个方向均为可点原型</div>
+</div>
+
+<script>
+var DEMOS = [
+  {
+    file: "01-aurora.html", no: "A", name: "极光仪控", en: "Aurora Instrument",
+    img: "_design/out/final/01-aurora-idle.png",
+    desc: "深空底色上浮着极光，玻璃面板像仪表一样悬停，一枚绕着下一场转动的轨道环是唯一的「活物」。安静、有纵深，深夜长时间盯着不累。",
+    sw: ["#070B16", "#5B58F0", "#8A3FE0", "#22D3EE", "#3ED598"],
+    radius: "卡片 18px / 控件 10px / chip 全圆角",
+    motion: "光斑 48s 漂移、状态呼吸、截图交叉淡入、数字滚动"
+  },
+  {
+    file: "02-blueprint.html", no: "B", name: "制图台", en: "Blueprint",
+    img: "_design/out/final/02-blueprint-idle.png",
+    desc: "整块面板是一张正在被绘制的工程图纸：坐标网格、尺寸标注线、引线标题。坐标和置信度被当成一等公民展示，让「点得准」这件事看得见。",
+    sw: ["#071A2F", "#4FD1FF", "#37E0B0", "#FFC861", "#FF7B72"],
+    radius: "2px（仅状态灯为正圆）",
+    motion: "标尺刻度逐格画出、连线描出、标题打字机、日志逐行追加"
+  },
+  {
+    file: "03-manual.html", no: "C", name: "纸面手册", en: "Paper Manual",
+    img: "_design/out/final/03-manual-idle.png",
+    desc: "像一本排版讲究的设备说明书：冷白纸面、零圆角、双线章节、目录带页码。执行结果不显示成小标签，而是盖一枚章，把机器的一次成功变成有分量的事。",
+    sw: ["#F1F2EE", "#1B3A6B", "#256B4E", "#8A6212", "#A8331F"],
+    radius: "0px（只有印章例外，因为它是「物」）",
+    motion: "印章砸下、引导点线画出、切页横向擦除、记录被荧光笔扫过"
+  },
+  {
+    file: "04-hardedge.html", no: "D", name: "硬边运维", en: "Hard Edge",
+    img: "_design/out/final/04-hardedge-idle.png",
+    desc: "一台硬塑料外壳的工业设备：2px 黑框、硬投影、机械摇杆开关、盖章一样的状态贴纸。自动化最大的风险是「以为它在跑其实挂了」，这个方向让状态无法被误读。",
+    sw: ["#FBFBF7", "#0E0E11", "#2434E8", "#C62C0E", "#00875A"],
+    radius: "0px（状态贴纸 2px，模拟裁切）",
+    motion: "面板从四边推进来、贴纸揭起再拍下、按钮按下位移、进度条横扫"
+  },
+  {
+    file: "05-quiet.html", no: "E", name: "静默方格", en: "Quiet Bento",
+    img: "_design/out/final/05-quiet-idle.png",
+    desc: "石墨灰三级底色、1px 细线、整屏最多两处琥珀色。信息密度最高、装饰最少，适合常驻桌面。首页顶部一条 24 小时轨道标出今天所有场次与「现在」的位置。",
+    sw: ["#0E0F11", "#15171A", "#E4A13C", "#4FB477", "#E0625C"],
+    radius: "卡片 8px / 控件 6px / chip 全圆角",
+    motion: "细线先画出来、内容随后上移淡入、悬停只换底色、24 小时游标实时右移"
+  }
+];
+
+var grid = document.getElementById("grid");
+DEMOS.forEach(function (d) {
+  var el = document.createElement("article");
+  el.className = "opt";
+  el.innerHTML =
+    '<a class="shot" href="' + d.file + '" target="_blank" rel="noopener">' +
+      '<img src="' + d.img + '" alt="方向 ' + d.no + ' · ' + d.name + ' 的概览页截图" loading="lazy" />' +
+    "</a>" +
+    '<div class="opt-body">' +
+      "<h3><span class=\"no\">" + d.no + "</span>" + d.name +
+        '<span style="font-weight:400;color:#6F777F;font-size:12.5px">' + d.en + "</span></h3>" +
+      "<p>" + d.desc + "</p>" +
+      "<div class=\"swatches\">" + d.sw.map(function (c) {
+        return '<span class="sw" style="background:' + c + '" title="' + c + '"></span>';
+      }).join("") + "</div>" +
+      "<dl class=\"meta\">" +
+        "<dt>圆角规则</dt><dd>" + d.radius + "</dd>" +
+        "<dt>动效基调</dt><dd>" + d.motion + "</dd>" +
+      "</dl>" +
+      '<div class="actions">' +
+        '<a class="primary" href="' + d.file + '" target="_blank" rel="noopener">打开原型</a>' +
+        '<a href="' + d.file + '?motion=0" target="_blank" rel="noopener">静态版</a>' +
+      "</div>" +
+    "</div>";
+  grid.appendChild(el);
+});
+</script>
+</body>
+</html>
