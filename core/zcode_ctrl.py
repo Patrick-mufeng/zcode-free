@@ -20,6 +20,13 @@ from loguru import logger
 STILL_ACTIVE = 259
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
+VK_MENU = 0x12                                  # ALT
+MODIFIER_KEYS = {"ALT": VK_MENU, "CTRL": 0x11, "SHIFT": 0x10, "WIN": 0x5B}
+
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
 # 任何情况下都不得结束的进程:系统外壳/关键进程 + 本程序自身
 # (实测事故:标题为 "zcode-free" 的窗口被误当成 ZCode 客户端,进程随后被结束)
 PROTECTED_EXES = {
@@ -143,11 +150,41 @@ def window_pid(hwnd: int) -> int | None:
         return None
 
 
-def _is_foreground(hwnd: int) -> bool:
+def is_foreground(hwnd: int) -> bool:
     try:
         return win32gui.GetForegroundWindow() == hwnd
     except Exception:
         return False
+
+
+def _set_foreground(hwnd: int) -> bool:
+    """置前一次;被前台锁定拒绝时,借 ALT 键解锁后再试。
+
+    ALT 必须成对按下/抬起。SetForegroundWindow 失败会抛异常,若把抬键语句写在
+    同一个 try 的末尾,异常会直接跳过抬键,ALT 就永远卡在按下状态,用户的键盘与
+    鼠标输入随之错乱(菜单栏被激活、点击变成 Alt+点击、焦点乱跳)。因此抬键放在
+    finally 里,任何失败路径都不会漏。
+    """
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        pass
+
+    alt_down = False
+    try:
+        win32api.keybd_event(VK_MENU, 0, 0, 0)
+        alt_down = True
+        win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
+    finally:
+        if alt_down:
+            try:
+                win32api.keybd_event(VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+            except Exception:
+                pass
 
 
 def foreground(hwnd: int) -> bool:
@@ -162,19 +199,10 @@ def foreground(hwnd: int) -> bool:
         pass
 
     for _ in range(3):
-        if _is_foreground(hwnd):
+        if is_foreground(hwnd):
             return True
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception:
-            # 前台锁定限制:用 ALT 键解锁后再试
-            try:
-                win32api.keybd_event(0x12, 0, 0, 0)  # VK_MENU down
-                win32gui.SetForegroundWindow(hwnd)
-                win32api.keybd_event(0x12, 0, win32con.KEYEVENTF_KEYUP, 0)
-            except Exception:
-                pass
-        if _is_foreground(hwnd):
+        _set_foreground(hwnd)
+        if is_foreground(hwnd):
             return True
         # 仍抢不到前台时,抬高 z 序:即使不抢键盘焦点,也不会被其他窗口压在下面
         try:
@@ -186,10 +214,46 @@ def foreground(hwnd: int) -> bool:
             pass
         time.sleep(0.25)
 
-    ok = _is_foreground(hwnd)
+    ok = is_foreground(hwnd)
     if not ok:
         logger.warning("窗口未能置前(已尝试抬高 z 序),截图仍可能被遮挡")
     return ok
+
+
+# ---------------- 输入状态 ----------------
+
+def idle_seconds() -> float | None:
+    """距用户最后一次键鼠输入的秒数(GetLastInputInfo);读不到时返回 None。
+
+    用于"用户正在用电脑就先别动手":自动化会抢前台并注入点击,
+    正在打字/拖拽时打断体验极差,还可能点错窗口。
+    """
+    try:
+        info = LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        elapsed = (ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF
+        return elapsed / 1000.0
+    except Exception:
+        return None
+
+
+def release_stuck_modifiers() -> list[str]:
+    """把系统认为仍按着的修饰键抬起来,返回被清理的键名。
+
+    兜底用:旧版本在置前失败时会把 ALT 卡在按下态,启动时清理一次,
+    免得用户重启程序后仍然打字/点击错乱。
+    """
+    released: list[str] = []
+    for name, vk in MODIFIER_KEYS.items():
+        try:
+            if win32api.GetAsyncKeyState(vk) & 0x8000:
+                win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+                released.append(name)
+        except Exception:
+            continue
+    return released
 
 
 def move_window(hwnd: int, rect: list[int] | tuple[int, int, int, int]) -> None:

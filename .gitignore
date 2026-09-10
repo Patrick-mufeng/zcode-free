@@ -33,3 +33,7 @@ Desktop.ini
 *.tmp
 *.bak
 *~
+
+# 演示目录下的实机审计产物:可随时用 panel-audit.mjs 重跑生成,不进版本库
+# (ui/demos/_design/out/final 是选型页要用的截图,保留)
+ui/demos/_design/out/panel/

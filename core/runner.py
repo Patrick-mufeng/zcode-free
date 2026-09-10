@@ -191,6 +191,13 @@ class Runner:
 
     def _one_attempt(self, session: dict, attempt: dict, dry: bool,
                      abort: threading.Event, cfg: dict) -> tuple[str, str]:
+        # 0) 用户正在用电脑就先别抢前台:等一个键鼠停顿,等不到就放弃本场
+        if not dry and self._wait_user_idle(cfg, abort):
+            if abort.is_set():
+                return "aborted", "看门狗超时,已强制中止"
+            logger.warning("检测到键鼠持续活动(电脑正在使用中),本场跳过以免打断操作")
+            return "manual", "检测到电脑正在使用中,已跳过本场(避免抢窗口打断操作);可稍后手动试领"
+
         # 1) 打开客户端
         self._set_step(STEPS[0])
         try:
@@ -255,11 +262,19 @@ class Runner:
         if box is None:
             return "retry", "模型返回的按钮位置无效"
 
-        # 3) 点击
+        # 3) 点击(动手前再确认两件事:用户没在用电脑、客户端确实在前台)
         self._set_step(STEPS[2])
         if dry:
             self._step(session, attempt, "点击领取", "ok", "演练模式:跳过实际点击")
         else:
+            if self._wait_user_idle(cfg, abort):
+                if abort.is_set():
+                    return "aborted", "看门狗超时,已强制中止"
+                self._step(session, attempt, "点击领取", "fail", "点击前检测到键鼠活动,已放弃")
+                return "manual", "点击前检测到电脑正在使用中,已跳过本次点击"
+            if not self._ensure_foreground(win, cfg):
+                self._step(session, attempt, "点击领取", "fail", "客户端窗口不在前台,已跳过点击")
+                return "retry", "客户端窗口未能置前,跳过点击以避免误点到其他窗口"
             clicker.click_norm(shot.rect, box, humanize=bool(cfg["vision"].get("humanize_mouse")))
             self._step(session, attempt, "点击领取", "ok",
                        f"已点击「{locate.get('button_label') or '领取'}」")
@@ -293,6 +308,44 @@ class Runner:
             hit = verify.get("keywords") or []
             return "retry", f"弹窗提示领取失败({',命中:' + '/'.join(map(str, hit)) if hit else ''})"
         return "retry", f"点击后未检测到结果弹窗:{note2 or '未知'}"
+
+    # ---------- 输入与前台保护 ----------
+
+    def _wait_user_idle(self, cfg: dict, abort: threading.Event) -> bool:
+        """用户正在用键鼠时先等一等:等到停顿返回 False,一直没停返回 True。
+
+        自动化会抢前台并注入点击,用户正在打字/拖拽时既打断操作,也可能点错窗口。
+        retry.user_idle_s = 0 可关闭该保护。
+        """
+        retry_cfg = cfg["retry"]
+        need = float(retry_cfg.get("user_idle_s") or 0)
+        wait = float(retry_cfg.get("user_idle_wait_s") or 0)
+        if need <= 0:
+            return False
+        deadline = time.time() + max(wait, 0.0)
+        while True:
+            idle = zcode.idle_seconds()
+            if idle is None:            # 读不到就放行,避免因系统差异卡死流程
+                return False
+            if idle >= need:
+                return False
+            if abort.is_set() or time.time() >= deadline:
+                return True
+            time.sleep(0.25)
+
+    def _ensure_foreground(self, win: dict, cfg: dict) -> bool:
+        """点击前确认窗口真的在前台;不在就再置前一次。
+
+        窗口没在前台时,点击坐标会落到用户当前正在用的窗口上——宁可不点。
+        """
+        hwnd = win["hwnd"]
+        if zcode.is_foreground(hwnd):
+            return True
+        zcode.foreground(hwnd)
+        if not zcode.is_foreground(hwnd):
+            return False
+        time.sleep(float(cfg["retry"].get("focus_settle_s") or 0.0))
+        return True
 
     # ---------- 客户端生命周期 ----------
 

@@ -83,6 +83,12 @@ def main() -> int:
     cfg, bus, store, vision, runner, scheduler, api = build_app()
     from loguru import logger
     from core.server import serve
+    from core.zcode_ctrl import release_stuck_modifiers
+
+    # 旧版本在置前失败时会把 ALT 卡在按下态,拖累整台机器的键鼠输入;启动时兜底清一次
+    released = release_stuck_modifiers()
+    if released:
+        logger.warning(f"已清理残留的按键状态:{'/'.join(released)}(不清会导致键盘/鼠标输入错乱)")
 
     if args.dry_run:
         cfg.patch({"app": {"dry_run": True}})

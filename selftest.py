@@ -45,13 +45,15 @@ def main() -> int:
     check("执行器:演练模式单次尝试与记录", lambda: __runner_dry_case())
     check("执行器:重试循环与收尾", lambda: __runner_retry_case())
     check("窗口进程校验(拒绝同名无关窗口 / 误关保护进程)", lambda: __window_guard_case())
+    check("修饰键保护(置前失败不再卡住 ALT / 启动可清理)", lambda: __modifier_guard_case())
+    check("用户占用保护(正在用键鼠时不抢前台、不点击)", lambda: __user_idle_guard_case())
     check("窗口摆放(全屏 / 固定矩形 / 演练不动窗口)", lambda: __position_window_case())
     check("加载期纯色等待与锁屏判定(不再误判跳过)", lambda: __ready_wait_case())
     check("残留任务状态自愈(断电后的 running 会话)", lambda: __stale_session_case())
     check("执行器:结果弹窗映射(成功收尾 / 失败重试)", lambda: __verify_mapping_case())
     check("测试识别接口(整屏,无 Key 时报错而不抛异常)", lambda: __test_locate_case())
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
-    check("动效护栏(禁止自我触发式观察)", lambda: __motion_guard_case())
+    check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
     check("HTTP 桥往返(get_state / 首页 / 静态资源)", lambda: __http_case())
     print()
     for line in PASS:
@@ -273,12 +275,24 @@ def __verify_mapping_case():
                                 rect=(40, 40, 1240, 860), uniform_ratio=0.3,
                                 full_size=(1920, 1080))
     runner._open_client = lambda dry, cfg: {"hwnd": 1, "title": "FakeZCode", "rect": [40, 40, 1240, 860], "area": 1}
-    runner._grab_window = lambda win, rect, cfg, dry, label: fake_shot
     runner._close_client = lambda dry: None
+    # 真实方法名是 _grab_ready(曾经的 bug:这里写的是不存在的 _grab_window,
+    # 打桩落空 → 自检真的截图并点了用户的鼠标)。返回 (截图, 未就绪原因)。
+    runner._grab_ready = lambda win, rect, cfg, dry, label, timeout=None: (fake_shot, None)
+    runner._position_window = lambda win, cfg, dry: tuple(win["rect"])
+    runner._wait_user_idle = lambda cfg, abort: False
+    runner._ensure_foreground = lambda win, cfg: True
     runner.vision.locate = lambda png: {
         "button_found": True, "claimable": True, "button_box": [0.4, 0.5, 0.6, 0.6],
         "button_label": "领取", "confidence": 0.95, "scene": "welfare",
     }
+
+    # 保险:即便上面的打桩将来再次失效,也绝不允许自检真的移动/点击鼠标
+    import core.clicker as clicker_module
+    real_click_norm, real_click_screen = clicker_module.click_norm, clicker_module.click_screen
+    clicks: list[tuple] = []
+    clicker_module.click_norm = lambda rect, box, humanize=False: clicks.append(("norm", rect, box))
+    clicker_module.click_screen = lambda x, y, humanize=False: clicks.append(("screen", x, y))
 
     def run(verify_result):
         runner.vision.verify = lambda png: verify_result
@@ -286,15 +300,30 @@ def __verify_mapping_case():
         attempt = store.begin_attempt(session, 1)
         return runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)[0]
 
-    success = run({"popup": "success", "keywords": ["领取成功", "开始体验"], "confidence": 0.95})
-    failure = run({"popup": "failure", "keywords": ["领取失败", "知道了"], "confidence": 0.95})
-    nothing = run({"popup": None, "success": False, "failed": False, "confidence": 0.4})
-    claimed = run({"claimed": True, "keywords": ["明日再来"], "confidence": 0.9})
+    try:
+        success = run({"popup": "success", "keywords": ["领取成功", "开始体验"], "confidence": 0.95})
+        failure = run({"popup": "failure", "keywords": ["领取失败", "知道了"], "confidence": 0.95})
+        nothing = run({"popup": None, "success": False, "failed": False, "confidence": 0.4})
+        claimed = run({"claimed": True, "keywords": ["明日再来"], "confidence": 0.9})
+    finally:
+        clicker_module.click_norm, clicker_module.click_screen = real_click_norm, real_click_screen
+
+    assert clicks, "点击未被拦截?这会让自检真的操作鼠标"
+    assert all(c[0] == "norm" for c in clicks), f"出现了屏幕直点:{clicks}"
     assert success == "success", f"成功弹窗应判成功,得到 {success}"
     assert claimed == "success", f"已领应判成功,得到 {claimed}"
     assert failure == "retry", f"失败弹窗应进入重试,得到 {failure}"
     assert nothing == "retry", f"无弹窗应进入重试,得到 {nothing}"
-    return "成功弹窗→成功;失败弹窗/无弹窗→重试"
+
+    # 前台校验不通过:跳过点击、计一次未成功(否则点击会落到用户当前窗口上)
+    intercepted = len(clicks)
+    runner._ensure_foreground = lambda win, cfg: False
+    clicks.clear()
+    blocked = run({"popup": "success", "keywords": ["领取成功"], "confidence": 0.95})
+    assert blocked == "retry", f"窗口不在前台应判重试,得到 {blocked}"
+    assert not clicks, f"窗口不在前台时不应点击:{clicks}"
+    runner._ensure_foreground = lambda win, cfg: True
+    return f"弹窗映射正确;点击全部被拦截({intercepted} 次);窗口不在前台时拒绝点击"
 
 
 def __ready_wait_case():
@@ -541,7 +570,145 @@ def __motion_guard_case():
     # 数据层必须通过显式接口驱动数字动画
     dashboard = (UI_DIR / "assets/js/pages/dashboard.js").read_text(encoding="utf-8")
     assert "MOTION.countTo" in dashboard, "数字卡片应使用 MOTION.countTo 显式驱动"
-    return "动效无自我触发写法,数字由数据层显式驱动"
+
+    # 排版纪律:页面结构里不应出现图标 SVG(纯文字排版)
+    index = (UI_DIR / "index.html").read_text(encoding="utf-8")
+    assert "<svg" not in index, "纯文字排版页面中不应再出现 SVG 图标"
+    css = (UI_DIR / "assets/css/app.css").read_text(encoding="utf-8")
+    for banned in ("backdrop-filter", "linear-gradient(135deg", "box-shadow"):
+        assert banned not in css, f"排版方案应避免 {banned}"
+    return "动效无自我触发写法;页面无图标;样式无渐变/阴影/毛玻璃"
+
+
+def __modifier_guard_case():
+    """回归:置前失败时不得把 ALT 键卡在按下态。
+
+    事故背景:foreground() 里"按下 ALT → SetForegroundWindow → 抬起 ALT"写在同一个
+    try 中,而置前失败会抛异常,抬键语句被跳过 → ALT 永久按下,整机键鼠输入错乱
+    (菜单被激活、点击变 Alt+点击、焦点乱跳)。
+    """
+    import win32con
+
+    import core.zcode_ctrl as zc
+
+    class FakeApi:
+        """记录按键事件并维护"哪些键正按着"。"""
+
+        def __init__(self, pressed=()):
+            self.events = []
+            self.pressed = set(pressed)
+
+        def keybd_event(self, vk, scan, flags, extra):
+            self.events.append((vk, flags))
+            if flags & win32con.KEYEVENTF_KEYUP:
+                self.pressed.discard(vk)
+            else:
+                self.pressed.add(vk)
+
+        def GetAsyncKeyState(self, vk):
+            return 0x8000 if vk in self.pressed else 0
+
+    class FakeGui:
+        def __init__(self, denied):
+            self.denied = denied
+
+        def SetForegroundWindow(self, hwnd):
+            if self.denied:
+                raise RuntimeError("前台锁定:系统拒绝置前")
+            return None
+
+    orig_api, orig_gui = zc.win32api, zc.win32gui
+    try:
+        # ① 置前被拒(抛异常):ALT 必须成对按下/抬起,不留残留
+        api, gui = FakeApi(), FakeGui(denied=True)
+        zc.win32api, zc.win32gui = api, gui
+        assert zc._set_foreground(1) is False, "被拒时应返回 False"
+        downs = [e for e in api.events if not e[1] & win32con.KEYEVENTF_KEYUP]
+        ups = [e for e in api.events if e[1] & win32con.KEYEVENTF_KEYUP]
+        assert len(downs) == len(ups) == 1, f"ALT 应按下 1 次、抬起 1 次,实际 {api.events}"
+        assert api.pressed == set(), f"ALT 仍处于按下态:{api.pressed}"
+
+        # ② 正常置前:不必借 ALT,也不留残留
+        api2 = FakeApi()
+        zc.win32api, zc.win32gui = api2, FakeGui(denied=False)
+        assert zc._set_foreground(1) is True
+        assert api2.events == [], f"成功路径不应注入按键:{api2.events}"
+
+        # ③ 启动兜底:系统里已卡住的 ALT 会被抬起
+        api3 = FakeApi(pressed={zc.VK_MENU})
+        zc.win32api = api3
+        assert zc.release_stuck_modifiers() == ["ALT"], "应清理卡住的 ALT"
+        assert api3.pressed == set(), "清理后 ALT 不应仍是按下态"
+        assert zc.release_stuck_modifiers() == [], "没有卡键时不应重复注入抬键"
+    finally:
+        zc.win32api, zc.win32gui = orig_api, orig_gui
+
+    idle = zc.idle_seconds()                     # 真实读数,不改变任何状态
+    assert idle is None or idle >= 0, f"空闲时长读数异常:{idle}"
+    return "置前失败不再卡住 ALT;启动兜底可清理残留按键"
+
+
+def __user_idle_guard_case():
+    """回归:用户正在用键鼠时不得抢前台/点击。
+
+    到点的场次若正撞上用户打字,会直接夺走焦点并注入点击;这里保证程序
+    先等一个键鼠停顿,等不到就跳过本场(manual),而不是硬抢。
+    """
+    import tempfile
+    from pathlib import Path
+
+    import core.zcode_ctrl as zc
+    from core.config import ConfigStore
+    from core.events import EventBus
+    from core.runner import Runner
+    from core.storage import SessionStore
+    from core.vision import VisionClient
+
+    tmp = Path(tempfile.mkdtemp(prefix="zcode-idle-"))
+    cfg = ConfigStore(tmp / "config.yaml")
+    cfg.patch({"retry": {"user_idle_s": 1.0, "user_idle_wait_s": 0.6}})
+    runner = Runner(cfg, EventBus(), SessionStore(tmp / "shots"), VisionClient(cfg))
+    cfg_dict = cfg.all()
+    abort = threading.Event()
+    orig = zc.idle_seconds
+    try:
+        # ① 已空闲足够久 → 直接放行,不等待
+        zc.idle_seconds = lambda: 5.0
+        started = time.time()
+        assert runner._wait_user_idle(cfg_dict, abort) is False
+        assert time.time() - started < 0.3, "已空闲时不应等待"
+
+        # ② 用户持续操作 → 等满上限后放弃本场
+        zc.idle_seconds = lambda: 0.1
+        started = time.time()
+        assert runner._wait_user_idle(cfg_dict, abort) is True, "持续占用应判为跳过"
+        elapsed = time.time() - started
+        assert 0.5 <= elapsed < 3.0, f"等待时长异常:{elapsed:.2f}s"
+
+        # ③ 先动后停 → 停止后放行
+        seq = {"n": 0}
+
+        def idle_seq():
+            seq["n"] += 1
+            return 0.1 if seq["n"] < 4 else 5.0
+
+        zc.idle_seconds = idle_seq
+        assert runner._wait_user_idle(cfg_dict, abort) is False, "停止操作后应放行"
+
+        # ④ user_idle_s = 0 关闭保护 → 立即放行
+        off = ConfigStore(tmp / "off.yaml")
+        off.patch({"retry": {"user_idle_s": 0}})
+        zc.idle_seconds = lambda: 0.0
+        started = time.time()
+        assert runner._wait_user_idle(off.all(), abort) is False
+        assert time.time() - started < 0.3, "关闭保护后不应等待"
+
+        # ⑤ 读不到输入状态 → 放行,避免因系统差异卡死流程
+        zc.idle_seconds = lambda: None
+        assert runner._wait_user_idle(cfg_dict, abort) is False
+    finally:
+        zc.idle_seconds = orig
+    return "用户占用时等待/跳过;关闭保护与读数失败均放行"
 
 
 def __ui_assets_case():
