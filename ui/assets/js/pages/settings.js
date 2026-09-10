@@ -8,7 +8,7 @@
     'sZcodePath', 'sTitleMatch', 'sFullscreen', 'sStartupWait',
     'sRectX', 'sRectY', 'sRectW', 'sRectH',
     'rAttempts', 'rGap', 'rOpenTimeout', 'rSettle', 'rFocusSettle',
-    'rAppReady', 'rVerifyReady', 'rWatchdog',
+    'rAppReady', 'rVerifyReady', 'rWatchdog', 'rUserIdle', 'rUserIdleWait',
     'sKeepAwake', 'sNotifyDesktop', 'sWebhook', 'sKeepDays',
   ];
 
@@ -39,6 +39,8 @@
         app_ready_timeout_s: Math.max(0, numberOr($('rAppReady').value, 20)),
         verify_ready_timeout_s: Math.max(0, numberOr($('rVerifyReady').value, 8)),
         watchdog_s: Math.max(30, numberOr($('rWatchdog').value, 480)),
+        user_idle_s: Math.max(0, numberOr($('rUserIdle').value, 1)),
+        user_idle_wait_s: Math.max(0, numberOr($('rUserIdleWait').value, 20)),
       },
       schedule: { keep_awake: $('sKeepAwake').checked },
       notify: {
@@ -128,6 +130,8 @@
         $('rAppReady').value = retry.app_ready_timeout_s != null ? retry.app_ready_timeout_s : 20;
         $('rVerifyReady').value = retry.verify_ready_timeout_s != null ? retry.verify_ready_timeout_s : 8;
         $('rWatchdog').value = retry.watchdog_s != null ? retry.watchdog_s : 480;
+        $('rUserIdle').value = retry.user_idle_s != null ? retry.user_idle_s : 1;
+        $('rUserIdleWait').value = retry.user_idle_wait_s != null ? retry.user_idle_wait_s : 20;
         $('sKeepAwake').checked = (data.schedule || {}).keep_awake !== false;
         $('sNotifyDesktop').checked = (data.notify || {}).desktop !== false;
         $('sWebhook').value = (data.notify || {}).webhook_url || '';

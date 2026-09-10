@@ -1,4 +1,4 @@
-/* 应用入口:标签页、顶栏状态、事件总线、Toast / 灯箱 / 确认框 */
+/* 应用入口:标签页、顶栏状态、24 小时轨道、事件总线、Toast / 灯箱 / 确认框 */
 (function () {
   const $ = (id) => document.getElementById(id);
   const STEPS = ['打开客户端', '识别按钮', '点击领取', '校验结果', '收尾'];
@@ -7,6 +7,20 @@
   let stepStatus = {};
   let lastAttempt = 0;
   let alertState = null;
+  let trackMarks = [];
+
+  // 本地执行态:exec_start 立刻切「执行中」,session_end 立刻切结果,
+  // 不必等后端下一次 get_state 回来(那一趟可能慢半秒,状态会显得滞后)。
+  let execRunning = false;
+  let freshResult = null;        // { type: 'success' , timer }
+  let freshTimer = null;
+
+  function setFreshResult(type) {
+    freshResult = type;
+    renderTopbar();
+    clearTimeout(freshTimer);
+    freshTimer = setTimeout(() => { freshResult = null; renderTopbar(); }, 4000);
+  }
 
   /* ---------- 通用组件 ---------- */
 
@@ -69,7 +83,146 @@
     if (page && page.onShow) page.onShow();
   }
 
-  /* ---------- 顶栏与步骤条 ---------- */
+  /* ---------- 顶栏 ---------- */
+
+  function renderTopbar() {
+    if (!state) return;
+    const dot = $('statusDot');
+    const text = $('statusText');
+    let cls = 'idle';
+    let label = '空闲';
+    if (execRunning || state.running) {
+      cls = 'running';
+      label = '执行中';
+    } else if (alertState) {
+      cls = alertState.type === 'manual' ? 'manual' : 'failed';
+      label = alertState.type === 'manual' ? '需人工' : '失败';
+    } else if (freshResult === 'success') {
+      cls = 'success';
+      label = '成功';
+    } else if (state.next_slot && (state.next_slot.ts - Date.now() / 1000) < 600) {
+      cls = 'waiting';
+      label = '等待中';
+    }
+    dot.className = 'dot ' + cls;
+    text.textContent = label;
+    $('nextSlot').textContent = state.next_slot ? state.next_slot.label : '--';
+    const busy = !!(state.running || execRunning);
+    $('master').checked = !!state.master;
+    $('master').disabled = busy;
+    ['runOnce', 'runOncePage', 'runDryPage'].forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = busy;
+    });
+  }
+
+  function tickCountdown() {
+    const el = $('countdown');
+    if (!state || !state.next_slot) {
+      el.textContent = '';
+      return;
+    }
+    const diff = Math.max(0, Math.floor(state.next_slot.ts - Date.now() / 1000));
+    const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+    const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+    const s = String(diff % 60).padStart(2, '0');
+    el.textContent = '还有 ' + h + ':' + m + ':' + s;
+  }
+
+  /* ---------- 24 小时轨道(签名元素) ---------- */
+
+  const MIN = 24 * 60;
+
+  function buildTrack() {
+    const axis = $('dtAxis');
+    if (!axis) return;
+    // 清掉旧的刻度与标记,只留基准线
+    axis.querySelectorAll('.dt-tick, .dt-tick-lbl, .dt-mark, .dt-cursor').forEach((n) => n.remove());
+
+    // 刻度:每 2 小时一根,每 6 小时一根主刻度并标时间
+    for (let h = 0; h <= 24; h += 2) {
+      const major = h % 6 === 0;
+      const left = (h / 24) * 100;
+      const tick = document.createElement('span');
+      tick.className = 'dt-tick' + (major ? ' major' : '');
+      tick.style.left = left + '%';
+      axis.appendChild(tick);
+      if (major) {
+        const lbl = document.createElement('span');
+        lbl.className = 'dt-tick-lbl' + (h === 0 ? ' edge-start' : (h === 24 ? ' edge-end' : ''));
+        lbl.style.left = left + '%';
+        lbl.textContent = String(h).padStart(2, '0') + ':00';
+        axis.appendChild(lbl);
+      }
+    }
+
+    // 场次标记:位置由时间换算,结果由最近记录回填
+    const slots = (state && state.slots) || [];
+    trackMarks = [];
+    slots.forEach((slot) => {
+      const time = String(slot.time || '');
+      const parts = time.split(':');
+      if (parts.length !== 2) return;
+      const minutes = Number(parts[0]) * 60 + Number(parts[1]);
+      if (!Number.isFinite(minutes)) return;
+
+      const mark = document.createElement('span');
+      mark.className = 'dt-mark' + (slot.enabled === false ? ' off' : '');
+      mark.style.left = (minutes / MIN) * 100 + '%';
+      mark.dataset.time = time;
+      mark.title = time + (slot.enabled === false ? ' · 未启用' : '') +
+        (slot.attempts != null ? ' · 覆盖尝试 ' + slot.attempts + ' 次' : '');
+      mark.innerHTML = '<span class="pin"></span><span class="dot"></span>' +
+        '<span class="lbl mono"></span><span class="out mono"></span>';
+      mark.querySelector('.lbl').textContent = time;
+      axis.appendChild(mark);
+      trackMarks.push(mark);
+    });
+
+    // 「现在」游标
+    const cursor = document.createElement('span');
+    cursor.className = 'dt-cursor';
+    cursor.id = 'dtCursor';
+    cursor.innerHTML = '<span class="cap mono" id="dtCursorCap">--:--</span>';
+    axis.appendChild(cursor);
+  }
+
+  function applyTrackResults(items) {
+    if (!trackMarks.length) return;
+    const byTime = {};
+    (items || []).forEach((item) => {
+      const slot = item.slot;
+      if (slot && !byTime[slot]) byTime[slot] = item;
+    });
+    trackMarks.forEach((mark) => {
+      const rec = byTime[mark.dataset.time];
+      const out = mark.querySelector('.out');
+      if (!rec) { out.textContent = ''; out.className = 'out mono'; return; }
+      const info = window.UITL.statusInfo(rec.status);
+      out.textContent = info.text;
+      out.className = 'out mono ' + (info.cls === 'ok' ? 'ok' : (info.cls === 'fail' ? 'fail' : ''));
+    });
+  }
+
+  function tickTrack() {
+    const cursor = $('dtCursor');
+    const cap = $('dtCursorCap');
+    const now = $('dtNow');
+    const d = new Date();
+    const minutes = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+    const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const pct = (minutes / MIN) * 100;
+    if (cursor) cursor.style.left = pct + '%';
+    if (cap) {
+      cap.textContent = hhmm;
+      // 贴边时把胶囊的锚点向内换,避免时间戳被面板裁掉
+      cap.style.left = pct < 4 ? '0%' : (pct > 96 ? '100%' : '50%');
+      cap.style.transform = pct < 4 ? 'translateX(0)' : (pct > 96 ? 'translateX(-100%)' : 'translateX(-50%)');
+    }
+    if (now) now.textContent = hhmm + ' · 本地时间';
+  }
+
+  /* ---------- 执行步骤条 ---------- */
 
   function buildSteps() {
     const box = $('steps');
@@ -96,51 +249,9 @@
       if (status) el.classList.add(status);
       el.querySelector('.circle').textContent = status === 'ok' ? '✓' : (status === 'fail' ? '✕' : '•');
     });
-    if (state && state.current) {
-      $('liveAttempt').textContent = `第 ${state.current.attempt || 0} / ${state.current.max_attempts || 0} 次尝试`;
-    }
   }
 
-  function renderTopbar() {
-    if (!state) return;
-    const dot = $('statusDot');
-    const text = $('statusText');
-    let cls = 'idle';
-    let label = '空闲';
-    if (state.running) {
-      cls = 'running';
-      label = '执行中' + (state.current && state.current.step ? ' · ' + state.current.step : '');
-    } else if (alertState) {
-      cls = alertState.type === 'manual' ? 'manual' : 'failed';
-      label = alertState.type === 'manual' ? '需人工' : '失败';
-    } else if (state.next_slot && (state.next_slot.ts - Date.now() / 1000) < 600) {
-      cls = 'waiting';
-      label = '等待中';
-    }
-    dot.className = 'dot ' + cls;
-    text.textContent = label;
-    $('nextSlot').textContent = state.next_slot ? state.next_slot.label : '--';
-    const busy = !!state.running;
-    $('master').checked = !!state.master;
-    $('master').disabled = busy;
-    ['runOnce', 'runOncePage', 'runDryPage'].forEach((id) => {
-      const el = $(id);
-      if (el) el.disabled = busy;
-    });
-  }
-
-  function tickCountdown() {
-    const el = $('countdown');
-    if (!state || !state.next_slot) {
-      el.textContent = '';
-      return;
-    }
-    const diff = Math.max(0, Math.floor(state.next_slot.ts - Date.now() / 1000));
-    const h = String(Math.floor(diff / 3600)).padStart(2, '0');
-    const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
-    const s = String(diff % 60).padStart(2, '0');
-    el.textContent = `(还有 ${h}:${m}:${s})`;
-  }
+  /* ---------- 状态刷新 ---------- */
 
   async function refreshState() {
     try {
@@ -150,6 +261,14 @@
     }
     renderTopbar();
     renderSteps();
+    // 场次数量或启用状态变化时重建轨道;否则只回填结果
+    const signature = ((state.slots || []).map((s) => s.time + (s.enabled === false ? '0' : '1')).join(',')) +
+      '|' + ((state.recent || []).map((r) => r.id || r.slot).join(','));
+    if (signature !== buildTrack.signature) {
+      buildTrack.signature = signature;
+      buildTrack();
+    }
+    applyTrackResults(state.recent);
     if (window.PAGES.dashboard && window.PAGES.dashboard.refresh) {
       window.PAGES.dashboard.refresh(state);
     }
@@ -162,6 +281,9 @@
 
     EV.on('exec_start', (event) => {
       alertState = null;
+      freshResult = null;
+      clearTimeout(freshTimer);
+      execRunning = true;
       stepStatus = {};
       lastAttempt = 0;
       $('livePanel').classList.remove('hidden');
@@ -177,13 +299,15 @@
       if (!event || !event.step) return;
       stepStatus[event.step] = event.status;
       renderSteps();
-      if (event.detail) $('liveMsg').textContent = `${event.step}:${event.detail}`;
+      if (event.detail) $('liveMsg').textContent = event.step + ':' + event.detail;
+      if (event.attempt) $('liveAttempt').textContent = '第 ' + event.attempt + ' 次尝试';
     });
 
     EV.on('attempt_update', async (event) => {
       if (!event) return;
       $('livePanel').classList.remove('hidden');
-      $('liveMsg').textContent = `第 ${event.attempt} 次尝试:${event.message || ''}`;
+      $('liveMsg').textContent = '第 ' + event.attempt + ' 次尝试:' + (event.message || '');
+      $('liveAttempt').textContent = '第 ' + event.attempt + ' 次尝试';
       if (event.attempt !== lastAttempt) {
         lastAttempt = event.attempt;
         stepStatus = {};
@@ -209,10 +333,12 @@
 
     EV.on('session_end', (event) => {
       if (!event) return;
+      execRunning = false;
       $('banner').classList.add('hidden');   // 先收起执行提示,失败时再弹告警
       const detail = event.summary || '';
       if (event.status === 'success') {
         alertState = null;
+        setFreshResult('success');
         toast('领取成功' + (detail ? ':' + detail : ''), 'ok');
       } else if (event.status === 'need_manual') {
         alertState = { type: 'manual', text: detail };
@@ -241,6 +367,7 @@
   async function boot() {
     await window.API.ready();
     buildSteps();
+    buildTrack();
 
     document.querySelectorAll('#tabs .tab').forEach((tab) =>
       tab.addEventListener('click', () => switchTab(tab.dataset.page)));
@@ -259,7 +386,7 @@
       try {
         const res = await window.API.call('run_once');
         toast((res && res.message) || '', res && res.ok ? 'ok' : 'err');
-        if (res && res.ok) switchTab('logs');
+        if (res && res.ok) { execRunning = true; renderTopbar(); switchTab('logs'); }
       } catch (err) {
         toast('启动失败:' + err.message, 'err');
       }
@@ -283,9 +410,17 @@
 
     await refreshState();
     switchTab('dashboard');
+    // 概览页就有「运行日志」面板,启动时先补一段历史,否则刚打开只有一行
+    if (window.PAGES.logs && window.PAGES.logs.loadHistory) {
+      window.PAGES.logs.loadHistory().catch(() => {});
+    }
+    // 轨道已建好,现在播开场序列(顺序确定,GSAP 不会找不到节点)
+    if (window.MOTION && window.MOTION.entrance) window.MOTION.entrance();
     API.call('ui_ready').catch(() => {});   // 告知后端「面板已加载」
     tickCountdown();
+    tickTrack();
     setInterval(tickCountdown, 1000);
+    setInterval(tickTrack, 1000);
     setInterval(refreshState, 15000);
   }
 

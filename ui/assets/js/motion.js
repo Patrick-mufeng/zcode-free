@@ -1,93 +1,107 @@
 /* =========================================================================
-   动效层(Aurora Console)
-   原则:只观察 DOM 变化,不参与业务逻辑;GSAP 缺失或系统偏好"减少动效"时
-   自动退化为静态呈现。全部动效仅使用 transform / opacity。
+   动效层 — 静默方格 Quiet Bento
+   原则:
+   1. 时长 .12~.24s,缓动 power2.out。安静、短促,不做弹跳和缩放。
+   2. 只观察 DOM 变化,不参与业务逻辑;GSAP 缺失或系统偏好"减少动效"时静态呈现。
+   3. 只用 transform / opacity;悬停靠 CSS 换底色,不动位移。
+   4. 禁止"观察某元素 → 再把动画写回该元素"的自我触发写法。
    ========================================================================= */
 (function () {
   const $ = (id) => document.getElementById(id);
   const gsap = window.gsap;
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // 支持 ?motion=0 关闭动效(低功耗 / 远程桌面 / 截图核对)
-  const motionOff = ['0', 'off', 'false'].includes(
-    (new URLSearchParams(location.search).get('motion') || '').toLowerCase());
+  const params = new URLSearchParams(location.search);
+
+  // ?motion=0 关闭动效(低功耗 / 远程桌面 / 截图核对)
+  const motionOff = ['0', 'off', 'false'].includes((params.get('motion') || '').toLowerCase());
   const animated = !!gsap && !reduceMotion && !motionOff;
+
+  // ?theme=dark|light 强制主题(默认深色)
+  const theme = (params.get('theme') || '').toLowerCase();
+  if (theme === 'dark' || theme === 'light') {
+    document.documentElement.dataset.theme = theme;
+  }
+
+  const EASE = 'power2.out';
+  const DUR = 0.18;
 
   function onReady(fn) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
     else fn();
   }
 
-  /* ---------- 侧栏导航光条 ---------- */
+  /* ---------- 侧栏选中指示条 ---------- */
 
-  let glowTween = null;
+  let ruleTween = null;
 
-  function glowTarget() {
+  function ruleTarget() {
     const tabs = $('tabs');
     const active = tabs && tabs.querySelector('.tab.active');
     if (!tabs || !active) return null;
     const parent = tabs.getBoundingClientRect();
     const rect = active.getBoundingClientRect();
-    return { y: rect.top - parent.top, height: rect.height };
+    return { y: rect.top - parent.top + (rect.height - 30) / 2, height: 30 };
   }
 
-  function positionGlow(animate) {
-    const glow = $('navGlow');
-    const target = glowTarget();
-    if (!glow || !target) return;
-    glow.style.height = target.height + 'px';
+  function positionRule(animate) {
+    const rule = $('navGlow');
+    const target = ruleTarget();
+    if (!rule || !target) return;
+    rule.style.height = target.height + 'px';
     if (animate && animated) {
-      if (glowTween) glowTween.kill();
-      glowTween = gsap.to(glow, {
-        y: target.y, opacity: 1, duration: 0.5, ease: 'expo.out', overwrite: 'auto',
-      });
+      if (ruleTween) ruleTween.kill();
+      ruleTween = gsap.to(rule, { y: target.y, scaleY: 1, opacity: 1, duration: 0.2, ease: EASE, overwrite: 'auto' });
     } else {
-      glow.style.transform = 'translateY(' + target.y + 'px)';
-      glow.style.opacity = '1';
+      rule.style.transform = 'translateY(' + target.y + 'px)';
+      rule.style.opacity = '1';
     }
   }
 
-  /* ---------- 页面切换:内容依次浮入 ---------- */
+  /* ---------- 页面内容入场:细线先画出来,内容随之上移淡入 ---------- */
 
-  function animatePageIn(delay) {
+  function animatePageIn() {
+    if (!animated) return;
     const page = document.querySelector('.page:not(.hidden)');
     if (!page) return;
-    const items = page.querySelectorAll(':scope > .cards > .card, :scope > .panel, :scope > .logs-layout');
-    if (!animated) return;
+    const items = page.querySelectorAll(':scope > .panel, :scope > .cards, :scope > .dash-grid, :scope > .logs-layout');
     gsap.fromTo(items,
-      { autoAlpha: 0, y: 14 },
-      { autoAlpha: 1, y: 0, duration: 0.55, stagger: 0.05, delay: delay || 0, ease: 'expo.out', overwrite: 'auto' });
+      { autoAlpha: 0, y: 6 },
+      { autoAlpha: 1, y: 0, duration: 0.22, stagger: 0.03, ease: EASE, overwrite: 'auto', clearProps: 'transform' });
   }
 
-  /* ---------- 开场序列 ---------- */
+  /* ---------- 开场序列:总时长控制在 1 秒内 ---------- */
 
   function bootEntrance() {
-    const tl = gsap.timeline({ defaults: { ease: 'expo.out', duration: 0.55 } });
-    tl.from('.sidebar .brand', { autoAlpha: 0, x: -12, duration: 0.5 })
-      .from('#tabs .tab', { autoAlpha: 0, x: -10, stagger: 0.05 }, '-=0.34')
-      .from('.topbar > *', { autoAlpha: 0, y: -10, stagger: 0.05 }, '-=0.42')
-      .from('.sidebar-foot > *', { autoAlpha: 0, y: 8, stagger: 0.06 }, '-=0.4')
-      .add(() => positionGlow(true), 0.15)
-      .add(() => animatePageIn(0), 0.1);
+    if (!animated || bootEntrance.done) return;
+    bootEntrance.done = true;
+    const tl = gsap.timeline({ defaults: { ease: EASE, duration: DUR } });
+    tl.from('.sidebar', { autoAlpha: 0, duration: 0.2 })
+      .from('.brand', { autoAlpha: 0, y: -4, duration: 0.18 }, 0.04)
+      .from('#tabs .tab', { autoAlpha: 0, x: -5, stagger: 0.025, duration: 0.18 }, 0.08)
+      .from('.sidebar-foot', { autoAlpha: 0, duration: 0.16 }, 0.2)
+      .from('.topbar', { autoAlpha: 0, y: -4, duration: 0.2 }, 0.06)
+      .from('.topbar > *', { autoAlpha: 0, duration: 0.18, stagger: 0.03 }, 0.12)
+      .from('.dt-rule', { scaleX: 0, transformOrigin: 'left center', duration: 0.3 }, 0.16)
+      .from('.dt-tick', { scaleY: 0, duration: 0.14, stagger: 0.008 }, 0.24)
+      .add(() => positionRule(true), 0.14)
+      .add(() => animatePageIn(), 0.22);
   }
 
   /* ---------- 观察器工具 ---------- */
 
-  const observers = [];
   function observe(target, options, fn) {
     if (!target || !animated) return;
-    const mo = new MutationObserver(fn);
-    mo.observe(target, options);
-    observers.push(mo);
+    new MutationObserver(fn).observe(target, options);
   }
 
-  /* ---------- Toast:弹性入场 ---------- */
+  /* ---------- Toast:轻微右移淡入 ---------- */
 
   function observeToasts() {
     observe($('toasts'), { childList: true }, (records) => {
       records.forEach((record) => {
         record.addedNodes.forEach((node) => {
           if (node.nodeType === 1 && node.classList.contains('toast')) {
-            gsap.from(node, { x: 30, autoAlpha: 0, duration: 0.5, ease: 'back.out(1.7)' });
+            gsap.from(node, { x: 14, autoAlpha: 0, duration: 0.22, ease: EASE });
           }
         });
       });
@@ -100,14 +114,13 @@
     observe($('banner'), { attributes: true, attributeFilter: ['class'] }, () => {
       const banner = $('banner');
       if (!banner || banner.classList.contains('hidden')) return;
-      gsap.fromTo(banner, { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.5, ease: 'expo.out' });
+      gsap.fromTo(banner, { autoAlpha: 0, y: -6 }, { autoAlpha: 1, y: 0, duration: 0.2, ease: EASE });
     });
   }
 
-  /* ---------- 状态灯:执行中呼吸 ---------- */
+  /* ---------- 状态文案副标题 ---------- */
 
   function observeStatus() {
-    const dot = $('statusDot');
     const sub = $('statusSub');
     let lastLabel = '';
 
@@ -115,16 +128,13 @@
       const label = ($('statusText') || {}).textContent || '';
       if (label === lastLabel) return;
       lastLabel = label;
-      if (sub) {
-        const master = $('master');
-        sub.textContent = label.indexOf('执行中') >= 0
-          ? '正在按流程执行,请勿遮挡 ZCode'
-          : (master && !master.checked ? '定时已关闭,可手动试领' : '自动领取待命');
-      }
-      if (!animated || !dot) return;
-      if (label.indexOf('执行中') >= 0) {
-        gsap.fromTo(dot, { scale: 0.8 }, { scale: 1, duration: 0.45, ease: 'back.out(2.4)' });
-      }
+      if (!sub) return;
+      const master = $('master');
+      if (label.indexOf('执行中') >= 0) sub.textContent = '正在按流程执行,请勿遮挡 ZCode';
+      else if (label.indexOf('需人工') >= 0) sub.textContent = '需要手动处理,详情见运行日志';
+      else if (label.indexOf('失败') >= 0) sub.textContent = '本场未成功,详情见运行日志';
+      else if (master && !master.checked) sub.textContent = '定时已关闭,可手动试领';
+      else sub.textContent = '自动领取待命';
     };
 
     observe($('statusText'), { childList: true, characterData: true, subtree: true }, sync);
@@ -133,33 +143,18 @@
     sync();
   }
 
-  /* ---------- 执行步骤:入场与状态弹跳 ---------- */
+  /* ---------- 执行步骤:节点逐个冒出来 ---------- */
 
   function observeSteps() {
-    const steps = $('steps');
-    observe(steps, { childList: true }, (records) => {
+    observe($('steps'), { childList: true }, (records) => {
       records.forEach((record) => {
         const added = Array.from(record.addedNodes).filter((n) => n.nodeType === 1);
-        if (added.length) {
-          gsap.from(added, { autoAlpha: 0, y: 8, duration: 0.45, stagger: 0.04, ease: 'expo.out' });
-        }
-      });
-    });
-    observe(steps, { attributes: true, attributeFilter: ['class'], subtree: true }, (records) => {
-      records.forEach((record) => {
-        const el = record.target;
-        if (!el.classList || !el.classList.contains('circle')) return;
-        const cls = el.parentElement ? el.parentElement.className : '';
-        gsap.fromTo(el,
-          { scale: 0.7 },
-          { scale: 1, duration: 0.42, ease: 'back.out(2.6)', overwrite: 'auto' });
+        if (added.length) gsap.from(added, { autoAlpha: 0, duration: 0.18, stagger: 0.02, ease: EASE });
       });
     });
   }
 
-  /* ---------- 实时截图:换图时交叉淡入 ----------
-     只监听 src 变化:GSAP 动画本身会写 style 属性,若连 style 一起监听,
-     就会像数字动画那样自我触发成环。 */
+  /* ---------- 实时截图:换图时淡入(只监听 src,避免与动画互触) ---------- */
 
   function observeLiveShot() {
     const shot = $('liveShot');
@@ -168,17 +163,19 @@
       const src = shot.getAttribute('src');
       if (!src || src === lastSrc) return;
       lastSrc = src;
-      gsap.fromTo(shot, { autoAlpha: 0, scale: 0.985 }, { autoAlpha: 1, scale: 1, duration: 0.45, ease: 'expo.out' });
+      gsap.fromTo(shot, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.24, ease: EASE });
     });
   }
 
-  /* ---------- 数字滚动 ----------
-     注意:数字动画**不能**由"观察自身文字变化"来驱动 —— 动画每一帧写回的
-     中间值会被当成新的数据变化,再次触发动画,形成永久来回弹跳(数字狂闪)。
-     因此改为显式调用:由数据层调用 MOTION.countTo(el, 目标值)。 */
+  /* ---------- 数字滚动(显式调用,不由观察触发) ---------- */
 
   function countTo(el, value) {
     if (!el) return;
+    // 只对纯数字做滚动,避免把 "✓2 ✗1" 这类组合文本拆坏
+    if (!/^\s*-?\d+(\.\d+)?\s*$/.test(String(el.textContent || ''))) {
+      el.textContent = String(value);
+      return;
+    }
     const target = Number(value);
     if (!Number.isFinite(target)) { el.textContent = String(value); return; }
 
@@ -187,18 +184,27 @@
       el.textContent = String(value);
       return;
     }
-    if (el.__numTween) el.__numTween.kill();     // 上一次未播完先停掉,避免叠加
-    const state = { v: current };
-    el.__numTween = gsap.to(state, {
-      v: target, duration: 0.55, ease: 'power2.out',
-      onUpdate: () => { el.textContent = String(Math.round(state.v)); },
+    if (el.__numTween) el.__numTween.kill();
+    const st = { v: current };
+    el.__numTween = gsap.to(st, {
+      v: target, duration: 0.32, ease: EASE,
+      onUpdate: () => { el.textContent = String(Math.round(st.v)); },
       onComplete: () => { el.__numTween = null; el.textContent = String(value); },
     });
   }
 
-  window.MOTION = { countTo };
+  window.MOTION = {
+    countTo,
+    // 开场序列:app.js 建好 24 小时轨道后再调用,避免 GSAP 找不到 .dt-tick
+    entrance: () => bootEntrance(),
+    entranceDone: () => !!bootEntrance.done,
+    ready: () => {
+      observeToasts(); observeBanner(); observeStatus(); observeSteps();
+      observeLiveShot(); observeLogs(); observeLiveLog();
+    },
+  };
 
-  /* ---------- 日志页:回放卡片与缩略图 ---------- */
+  /* ---------- 日志回放卡片与缩略图 ---------- */
 
   function observeLogs() {
     const detail = $('sessionDetail');
@@ -206,36 +212,42 @@
       records.forEach((record) => {
         const attempts = Array.from(record.addedNodes)
           .filter((n) => n.nodeType === 1 && n.classList.contains('attempt'));
-        if (attempts.length) {
-          gsap.from(attempts, { autoAlpha: 0, y: 12, duration: 0.5, stagger: 0.07, ease: 'expo.out' });
-        }
+        if (attempts.length) gsap.from(attempts, { autoAlpha: 0, y: 5, duration: 0.2, stagger: 0.03, ease: EASE });
       });
     });
     observe(detail, { childList: true, subtree: true }, (records) => {
       records.forEach((record) => {
         record.addedNodes.forEach((node) => {
           if (node.nodeType === 1 && node.tagName === 'IMG') {
-            gsap.from(node, { autoAlpha: 0, duration: 0.45, ease: 'expo.out' });
+            gsap.from(node, { autoAlpha: 0, duration: 0.2, ease: EASE });
           }
         });
       });
     });
   }
 
-  /* ---------- 环境光缓慢漂移 ---------- */
+  /* ---------- 实时日志:新行轻微下移淡入 ---------- */
 
-  function ambient() {
-    gsap.to('.blob-1', { xPercent: 8, yPercent: 6, duration: 23, repeat: -1, yoyo: true, ease: 'sine.inOut' });
-    gsap.to('.blob-2', { xPercent: -7, yPercent: -5, duration: 29, repeat: -1, yoyo: true, ease: 'sine.inOut' });
-    gsap.to('.blob-3', { xPercent: 10, yPercent: -8, duration: 34, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+  function observeLiveLog() {
+    const box = $('liveLog');
+    let seen = box ? box.children.length : 0;
+    observe(box, { childList: true }, () => {
+      const nodes = Array.from(box.children);
+      if (nodes.length <= seen) { seen = nodes.length; return; }
+      const fresh = nodes.slice(seen);
+      seen = nodes.length;
+      gsap.from(fresh, { autoAlpha: 0, y: 4, duration: 0.16, ease: EASE });
+    });
   }
 
-  /* ---------- 启动 ---------- */
+  /* ---------- 连接标识 ---------- */
 
   function connectLabel() {
     const text = $('connText');
     if (text) text.textContent = location.host || '本地服务';
   }
+
+  /* ---------- 启动 ---------- */
 
   onReady(() => {
     connectLabel();
@@ -244,32 +256,34 @@
     // 因此页面不可见时直接呈现最终状态。
     const canAnimate = animated && document.visibilityState !== 'hidden';
     if (!canAnimate) {
-      positionGlow(false);
+      positionRule(false);
       return;
     }
 
-    gsap.defaults({ ease: 'expo.out', duration: 0.5 });
-    ambient();
-    bootEntrance();
+    gsap.defaults({ ease: EASE, duration: DUR });
     observeToasts();
     observeBanner();
     observeStatus();
     observeSteps();
     observeLiveShot();
     observeLogs();
+    observeLiveLog();
+
+    // 兜底:app.js 若因为接口异常没能建出轨道,这里 1.5 秒后仍把界面显示完整
+    setTimeout(() => bootEntrance(), 1500);
 
     const tabs = $('tabs');
     if (tabs) {
       tabs.addEventListener('click', (event) => {
         if (!event.target.closest('.tab')) return;
-        setTimeout(() => { positionGlow(true); animatePageIn(0.04); }, 40);
+        setTimeout(() => { positionRule(true); animatePageIn(); }, 30);
       });
     }
 
     let resizeTimer = null;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => positionGlow(false), 150);
+      resizeTimer = setTimeout(() => positionRule(false), 150);
     });
   });
 })();

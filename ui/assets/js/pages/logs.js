@@ -100,7 +100,8 @@
   }
 
   function renderLog() {
-    const filter = ($('logFilter').value || '').trim().toLowerCase();
+    const filterEl = $('logFilter');
+    const filter = ((filterEl && filterEl.value) || '').trim().toLowerCase();
     const box = $('liveLog');
     const items = filter
       ? logLines.filter((line) => (line.message || '').toLowerCase().includes(filter))
@@ -118,6 +119,39 @@
     } else {
       box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
     }
+    renderDashLog();
+  }
+
+  /* 概览页也要能直接看到最近日志,复用同一份数据,只取尾部若干行 */
+  const DASH_LINES = 40;
+  function renderDashLog() {
+    const box = $('dashLog');
+    if (!box) return;
+    if (!logLines.length) {
+      box.innerHTML = '<div class="lv-DEBUG">暂无日志输出</div>';
+      return;
+    }
+    box.innerHTML = logLines.slice(-DASH_LINES).map((line) =>
+      `<div class="${LEVEL_CLASS[line.level] || 'lv-INFO'}">[${window.UITL.esc(line.ts)}] ${window.UITL.esc(line.message)}</div>`
+    ).join('');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* 补拉历史日志;本地已有的实时行按「时间+内容」去重后接在后面。
+     概览页与日志页共用同一份数据,所以这个方法要对两处都生效。 */
+  async function loadHistory() {
+    if (historyLoaded) return;
+    try {
+      const logs = await window.API.call('get_logs', { limit: 300 });
+      const history = ((logs && logs.items) || []).map((item) => ({
+        ts: (item.ts || '').slice(11), level: item.level, message: item.message,
+      }));
+      const localKeys = new Set(logLines.map((line) => line.ts + line.message));
+      logLines = history.filter((line) => !localKeys.has(line.ts + line.message)).concat(logLines);
+      historyLoaded = true;
+      renderDashLog();
+      if (!$('page-logs').classList.contains('hidden')) renderLog();
+    } catch (err) { /* 忽略:仅影响历史日志 */ }
   }
 
   window.PAGES.logs = {
@@ -137,29 +171,21 @@
         window.APP.toast('读取记录失败:' + err.message, 'err');
       }
 
-      // 首次进入时补拉历史日志;本地已有的实时行按「时间+内容」去重后接在后面
-      if (!historyLoaded) {
-        try {
-          const logs = await window.API.call('get_logs', { limit: 300 });
-          const history = ((logs && logs.items) || []).map((item) => ({
-            ts: (item.ts || '').slice(11), level: item.level, message: item.message,
-          }));
-          const localKeys = new Set(logLines.map((line) => line.ts + line.message));
-          logLines = history.filter((line) => !localKeys.has(line.ts + line.message)).concat(logLines);
-          historyLoaded = true;
-        } catch (err) { /* 忽略:仅影响历史日志 */ }
-      }
+      await loadHistory();
       // 无论是否新拉取过,进入页面都要渲染一次(实时行可能早已推送过来)
       renderLog();
     },
 
     open,
+    renderDashLog,
+    loadHistory,
 
     appendLog(event) {
       if (!event) return;
       logLines.push({ ts: event.ts || '', level: event.level || 'INFO', message: event.message || '' });
       if (logLines.length > 800) logLines = logLines.slice(-800);
       if (!$('page-logs').classList.contains('hidden')) renderLog();
+      else renderDashLog();
     },
   };
 })();

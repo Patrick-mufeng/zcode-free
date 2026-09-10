@@ -136,6 +136,8 @@
       $('btnTestLocate').addEventListener('click', async () => {
         const box = $('locateResult');
         box.classList.remove('hidden');
+        const ph = $('locatePlaceholder');
+        if (ph) ph.classList.add('hidden');
         $('locateMeta').textContent = '截图中…';
         $('locateJson').textContent = '';
         $('locateImage').removeAttribute('src');

@@ -37,6 +37,11 @@
     const tbody = $('slotTable').querySelector('tbody');
     tbody.innerHTML = '';
     $('slotEmpty').classList.toggle('hidden', slots.length > 0);
+    const countEl = $('slotCount');
+    if (countEl) {
+      const on = slots.filter((s) => s.enabled !== false).length;
+      countEl.textContent = slots.length + ' 个场次 · 启用 ' + on + ' 个';
+    }
 
     slots.forEach((slot, index) => {
       const result = lastResults[slot.time];
@@ -48,7 +53,7 @@
         <td><input type="number" class="attempts" min="1" max="20" placeholder="默认" value="${slot.attempts != null ? slot.attempts : ''}" /></td>
         <td><input type="number" class="gap" min="1" max="120" placeholder="默认" value="${slot.retry_gap_s != null ? slot.retry_gap_s : ''}" /></td>
         <td class="${info ? info.cls : 'muted'}">${info ? window.UITL.esc(info.text) + (result.started_at ? ' · ' + window.UITL.esc(window.UITL.dt(result.started_at)) : '') : '—'}</td>
-        <td><button class="btn small danger" title="删除场次" aria-label="删除场次"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button></td>`;
+        <td><button class="btn small danger" title="删除场次" aria-label="删除场次">删除</button></td>`;
       tr.querySelector('input[type="checkbox"]').addEventListener('change', () => save(true));
       tr.querySelector('input[type="time"]').addEventListener('change', () => save(true));
       tr.querySelector('.attempts').addEventListener('change', () => save(true));

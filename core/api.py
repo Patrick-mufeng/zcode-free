@@ -58,8 +58,9 @@ class Api:
             "next_slot": self.scheduler.next_run(),
             "slots_total": len(slots),
             "slots_enabled": len([s for s in slots if isinstance(s, dict) and s.get("enabled", True)]),
+            "slots": slots,          # 面板首页的 24 小时轨道按时间画出每个场次
             "today": self.store.today_stats(),
-            "recent": self.store.list_sessions(limit=3),
+            "recent": self.store.list_sessions(limit=12),   # 概览底部的记录表要铺满面板
             "has_key": bool((cfg["vision"].get("api_key") or "").strip()),
             "zcode_path": cfg["app"].get("zcode_path") or "",
             "dry_run": bool(cfg["app"].get("dry_run")),
