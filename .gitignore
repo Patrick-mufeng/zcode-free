@@ -1,0 +1,35 @@
+# ============================================================
+#  运行时数据 —— 绝不提交
+#  data/config.yaml 含你的 DeepSeek API Key(明文),
+#  data/shots、data/probe 含屏幕截图(可能包含账号等信息),
+#  data/logs 含运行日志。
+# ============================================================
+data/
+
+# 虚拟环境(约 66MB,可用 requirements.txt 重建)
+.venv/
+venv/
+env/
+
+# Python 生成物
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+Desktop.ini
+
+# 临时与备份
+*.log
+*.tmp
+*.bak
+*~

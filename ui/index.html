@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZCode 福利助手</title>
+<link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body>
+
+<!-- 环境光背景层 -->
+<div class="ambient" aria-hidden="true">
+  <span class="blob blob-1"></span>
+  <span class="blob blob-2"></span>
+  <span class="blob blob-3"></span>
+  <span class="grain"></span>
+</div>
+
+<div id="banner" class="banner hidden">
+  <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 21 19.5H3z"/><path d="M12 9.5v4.5M12 17h.01"/></svg>
+  <span id="bannerText"></span>
+  <button id="bannerClose" class="icon-btn" title="关闭" aria-label="关闭提示">
+    <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+</div>
+
+<div class="app">
+
+  <!-- ==================== 侧边导航 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 2.5 20 7v10l-8 4.5L4 17V7z"/><path d="M9 9.5h6l-6 5h6"/></svg>
+      </span>
+      <span class="brand-text">
+        <b>ZCode 福利助手</b>
+        <i>自动领取控制台</i>
+      </span>
+    </div>
+
+    <nav class="tabs" id="tabs" aria-label="主导航">
+      <span class="nav-glow" id="navGlow" aria-hidden="true"></span>
+      <button class="tab active" data-page="dashboard">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>
+        <span>概览</span>
+      </button>
+      <button class="tab" data-page="flow">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h6M4 18h10"/><circle cx="18" cy="6" r="2.2"/><circle cx="14" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>
+        <span>流程</span>
+      </button>
+      <button class="tab" data-page="schedule">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M12 13.5v3l2.5 1.5"/></svg>
+        <span>场次表</span>
+      </button>
+      <button class="tab" data-page="vision">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5V6a3 3 0 0 1 3-3h1.5M16.5 3H18a3 3 0 0 1 3 3v1.5M21 16.5V18a3 3 0 0 1-3 3h-1.5M7.5 21H6a3 3 0 0 1-3-3v-1.5"/><circle cx="12" cy="12" r="3.2"/></svg>
+        <span>识别</span>
+      </button>
+      <button class="tab" data-page="logs">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20"/><path d="M4 6.5h.01M4 12h.01M4 17.5h.01"/></svg>
+        <span>运行日志</span>
+      </button>
+      <button class="tab" data-page="settings">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="17" r="2.2"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="conn"><span class="dot" id="connDot"></span><span id="connText">连接中…</span></div>
+      <div class="ver">v1.1 · 本地服务</div>
+    </div>
+  </aside>
+
+  <!-- ==================== 主区域 ==================== -->
+  <div class="shell">
+
+    <header class="topbar">
+      <div class="status">
+        <span id="statusDot" class="dot idle"></span>
+        <span class="status-text">
+          <b id="statusText">空闲</b>
+          <i id="statusSub">自动领取待命</i>
+        </span>
+      </div>
+
+      <div class="next">
+        <span class="next-label">下一场</span>
+        <b id="nextSlot" class="mono">--</b>
+        <span id="countdown" class="mono muted"></span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <label class="switch" title="总开关:关闭后定时场次不触发(手动试领仍可用)">
+        <input type="checkbox" id="master" /><span class="slider"></span>
+      </label>
+      <button id="runOnce" class="btn primary">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.6v12.8L19 12z" fill="currentColor" stroke="none"/></svg>
+        <span>试领一次</span>
+      </button>
+    </header>
+
+    <main>
+
+      <!-- ============ 概览 ============ -->
+      <section id="page-dashboard" class="page">
+        <div class="cards">
+          <div class="card">
+            <div class="card-top">
+              <span class="card-label">下场时间</span>
+              <span class="card-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+            </div>
+            <div class="value" id="cardNext">--</div>
+            <div class="sub" id="cardNextSub">未配置场次</div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-label">今日场次</span>
+              <span class="card-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M8 3v3.5M16 3v3.5"/></svg></span>
+            </div>
+            <div class="value" id="cardSlots">0</div>
+            <div class="sub" id="cardSlotsSub">启用 0 个</div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-label">今日结果</span>
+              <span class="card-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg></span>
+            </div>
+            <div class="value" id="cardToday">-</div>
+            <div class="sub" id="cardTodaySub">暂无记录</div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-label">运行状态</span>
+              <span class="card-icon"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14l4-5 4 7 3-4h5"/></svg></span>
+            </div>
+            <div class="value" id="cardState">空闲</div>
+            <div class="sub" id="cardStateSub">总开关:--</div>
+          </div>
+        </div>
+
+        <div class="panel" id="setupPanel">
+          <div class="panel-head">
+            <div class="panel-title">上手检查 <span class="muted">三步开始自动领取</span></div>
+            <span class="chip-chip" id="setupCount">0 / 3</span>
+          </div>
+          <ul class="checklist" id="setupList">
+            <li data-key="key">
+              <span class="tick" aria-hidden="true"></span>
+              <div><b>填写 DeepSeek API Key</b><i>识别页 → 模型连接,填完点「连接与额度测试」</i></div>
+              <button class="btn small" data-goto="vision">去填写</button>
+            </li>
+            <li data-key="slots">
+              <span class="tick" aria-hidden="true"></span>
+              <div><b>添加每日场次</b><i>场次表 → 添加场次,例如 10:00 / 16:00</i></div>
+              <button class="btn small" data-goto="schedule">去添加</button>
+            </li>
+            <li data-key="master">
+              <span class="tick" aria-hidden="true"></span>
+              <div><b>打开总开关</b><i>顶栏右侧开关,开启后到点自动执行</i></div>
+              <button class="btn small" data-action="master">去开启</button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">手动测试 <span class="muted">不进调度,点一下立刻跑一次</span></div>
+          </div>
+          <div class="row wrap">
+            <button class="btn primary" id="runOncePage">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.6v12.8L19 12z" fill="currentColor" stroke="none"/></svg>
+              <span>试领一次(完整流程)</span>
+            </button>
+            <button class="btn" id="runDryPage">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.2 21 19.2H3z"/><path d="M12 9.6v4.2M12 16.4h.01"/></svg>
+              <span>演练一次(不点击、不关客户端)</span>
+            </button>
+          </div>
+          <p class="hint">完整流程:打开/复用 ZCode → 置顶窗口后截图 → 视觉识别领取按钮 → 点击 → 校验;未成功则关闭客户端、等 5 秒重开,最多 5 次。演练模式同样会先置顶窗口再截图识别,但不会移动鼠标、不会关闭客户端,适合先验证配置。</p>
+        </div>
+
+        <div class="panel hidden" id="livePanel">
+          <div class="panel-head">
+            <div class="panel-title">本次执行 <span class="muted mono" id="liveSession"></span></div>
+            <div class="muted mono" id="liveAttempt"></div>
+          </div>
+          <div class="steps" id="steps"></div>
+          <div class="live-body">
+            <div class="live-msg mono" id="liveMsg">等待开始…</div>
+            <div class="live-shot"><img id="liveShot" alt="实时截图" /></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">最近记录</div>
+            <button class="btn small ghost" id="gotoLogs">查看全部日志</button>
+          </div>
+          <table class="table" id="recentTable">
+            <thead><tr><th>时间</th><th>场次</th><th>结果</th><th>说明</th><th>尝试</th><th style="width:80px"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty hidden" id="recentEmpty">暂无记录,等待第一场执行</div>
+        </div>
+      </section>
+
+      <!-- ============ 流程 ============ -->
+      <section id="page-flow" class="page hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">整体流程 <span class="muted">到点或手动触发后,一次领取的完整生命周期</span></div>
+            <span class="chip-chip" id="flowPhase">空闲</span>
+          </div>
+          <div class="flow" id="flowMain">
+            <div class="flow-node" data-node="trigger"><b>触发</b><i>场次到点 / 手动测试</i></div>
+            <div class="flow-node" data-node="open"><b>打开客户端</b><i>复用或启动 + 置顶</i></div>
+            <div class="flow-node" data-node="shot1"><b>截图</b><i>按窗口区裁图</i></div>
+            <div class="flow-node" data-node="locate"><b>视觉定位 ①</b><i>找领取按钮</i></div>
+            <div class="flow-node" data-node="click"><b>点击领取</b><i>归一化→屏幕坐标</i></div>
+            <div class="flow-node" data-node="verify"><b>校验 ②</b><i>看是否成功</i></div>
+            <div class="flow-node" data-node="done"><b>收尾</b><i>留档 + 通知</i></div>
+          </div>
+            <div class="flow-branches">
+            <div class="branch ok" data-branch="ok"><b>成功弹窗(领取成功 + 开始体验)</b><span>截图留档 → 通知 → 保留窗口,等下一场</span></div>
+            <div class="branch retry" data-branch="retry"><b>失败弹窗(领取失败 + 知道了) / 未成功</b><span>关闭客户端 → 等 5 秒 → 重开重试(默认最多 5 次)</span></div>
+            <div class="branch manual" data-branch="manual"><b>需人工(登录页/验证码)</b><span>立即停止本场 → 通知,不浪费重试次数</span></div>
+          </div>
+          <p class="hint">执行时上方节点会实时高亮:已完成打绿、当前步骤发光、失败标红;下方分支卡片会闪一下表示本次走了哪条路。</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">识别逻辑 <span class="muted">两次模型调用 + 若干本地判定</span></div>
+          <div class="stages">
+            <article class="stage">
+              <header><span class="idx">1</span><b>截图</b><i>本地 · 无网络</i></header>
+              <ul>
+                <li>先置顶 ZCode(必要时复位窗口位置),再抓屏</li>
+                <li>mss 全屏抓取 → 按窗口矩形裁剪出「窗口图」</li>
+                <li>单色占比 &gt; 0.95 → 判为锁屏/黑屏,当「需人工」处理</li>
+              </ul>
+            </article>
+            <article class="stage">
+              <header><span class="idx">2</span><b>定位(模型调用 ①)</b><i>DeepSeek 视觉</i></header>
+              <ul>
+                <li>输入:窗口图 + 定位 Prompt(要求只输出 JSON)</li>
+                <li>输出:scene / claimable / already_claimed / button_found / <b>button_box(归一化 0~1)</b> / ocr_texts / confidence / notes</li>
+                <li>结构化保障:prompt 含 json 示例 + <code>response_format</code> + 本地 JSON 修复</li>
+              </ul>
+            </article>
+            <article class="stage">
+              <header><span class="idx">3</span><b>点击</b><i>本地</i></header>
+              <ul>
+                <li>取 <code>button_box</code> 中心 → 归一化坐标</li>
+                <li>屏幕坐标 = 窗口矩形原点 + 归一化 × 矩形尺寸</li>
+                <li>pyautogui 点击(FAILSAFE:鼠标甩到左上角可急停),等 1.5s</li>
+              </ul>
+            </article>
+            <article class="stage">
+              <header><span class="idx">4</span><b>校验(模型调用 ②)</b><i>DeepSeek 视觉</i></header>
+              <ul>
+                <li>结果以<b>弹窗</b>呈现:成功 =「领取成功 + 开始体验」,失败 =「领取失败 + 知道了」</li>
+                <li>再次置顶 + 截图,输入校验 Prompt</li>
+                <li>输出:success / failed / popup / keywords / confidence / notes</li>
+                <li>成功弹窗或命中成功词 → 收尾;失败弹窗 → 关客户端重试</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">判定规则 <span class="muted">模型给"观察",规则做"决策"</span></div>
+          <table class="table">
+            <thead><tr><th style="width:130px">阶段</th><th>判据</th><th style="width:210px">动作</th></tr></thead>
+            <tbody>
+              <tr><td>定位</td><td>场景 = 登录页 / 验证码等异常界面</td><td class="fail">需人工,立即停止本场</td></tr>
+              <tr><td>定位</td><td>已领标记为真,或命中「已领词」(如 明日再来)</td><td class="ok">按已领取收尾,不再点击</td></tr>
+              <tr><td>定位</td><td>找到按钮 且 可领 且 置信度 ≥ 阈值(默认 0.70)</td><td>执行点击,进入校验</td></tr>
+              <tr><td>定位</td><td>以上都不满足(没找到/置信度不足)</td><td>未成功 → 关客户端重试</td></tr>
+              <tr><td>校验</td><td>成功弹窗:含「领取成功」或「开始体验」</td><td class="ok">成功,留档 + 通知</td></tr>
+              <tr><td>校验</td><td>失败弹窗:含「领取失败」或「知道了」</td><td>未成功 → 关客户端重试</td></tr>
+              <tr><td>校验</td><td>claimed 为真,或命中「已领词」</td><td class="ok">按已领取收尾</td></tr>
+              <tr><td>校验</td><td>没有弹窗、与点击前无明显变化</td><td>未成功 → 关客户端重试</td></tr>
+            </tbody>
+          </table>
+          <p class="hint">词表与阈值都可在「识别」页调整;成功/失败以结果弹窗为主证据,词表只匹配模型给出的结构化字段(keywords / ocr_texts / 按钮文字),不匹配模型自己的解释文字,避免误判。</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">坐标换算 <span class="muted">为什么用归一化坐标</span></div>
+          <div class="coord">
+            <div class="coord-box"><b>窗口矩形</b><i>由程序摆放或实测</i><code>x=40, y=40, w=1240, h=860</code></div>
+            <div class="coord-op">+</div>
+            <div class="coord-box"><b>归一化中心点</b><i>模型返回的 button_box 中心</i><code>cx=0.50, cy=0.65</code></div>
+            <div class="coord-op">=</div>
+            <div class="coord-box"><b>屏幕坐标</b><i>交给 pyautogui 点击</i><code>x=40+0.50×1240=660</code><code>y=40+0.65×860=599</code></div>
+          </div>
+          <p class="hint">模型内部会把图片缩放到约 800×800 等效,像素坐标含义不确定,所以统一用「相对整图的 0~1 比例」;<code>normalize_box()</code> 还兼容模型偶尔返回百分比或像素值的情况。</p>
+        </div>
+      </section>
+
+      <!-- ============ 场次表 ============ -->
+      <section id="page-schedule" class="page hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">每日固定场次</div>
+            <button class="btn primary" id="addSlot">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
+              <span>添加场次</span>
+            </button>
+          </div>
+          <table class="table" id="slotTable">
+            <thead><tr>
+              <th style="width:64px">启用</th>
+              <th style="width:132px">时间</th>
+              <th style="width:150px">尝试次数</th>
+              <th style="width:160px">重试间隔(s)</th>
+              <th>最近结果</th>
+              <th style="width:60px"></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty hidden" id="slotEmpty">还没有场次,点击右上角「添加场次」创建第一场</div>
+          <p class="hint">「尝试次数 / 重试间隔」留空表示继承全局默认(设置页);修改后立即保存并生效,无需重启。</p>
+        </div>
+        <div class="panel">
+          <div class="panel-title">未来 7 天预览</div>
+          <div id="weekPreview" class="week"></div>
+        </div>
+      </section>
+
+      <!-- ============ 识别 ============ -->
+      <section id="page-vision" class="page hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">模型连接 <span class="chip-chip">DeepSeek</span></div>
+            <button class="btn" id="btnTestConn">连接与额度测试</button>
+          </div>
+          <div class="form-grid">
+            <label>Provider</label>
+            <select id="vProvider">
+              <option value="deepseek">deepseek(默认)</option>
+              <option value="zhipu">zhipu(备选)</option>
+              <option value="dashscope">dashscope(备选)</option>
+              <option value="custom">custom(自建/其他)</option>
+            </select>
+            <label>base_url</label>
+            <input type="text" id="vBaseUrl" placeholder="https://api.deepseek.com" />
+            <label>API Key</label>
+            <div class="row">
+              <input type="password" id="vApiKey" placeholder="platform.deepseek.com 创建" />
+              <button class="btn small" id="vToggleKey">显示</button>
+            </div>
+            <label>Model</label>
+            <input type="text" id="vModel" placeholder="deepseek-v4-flash-vision-exp" />
+            <label>temperature</label>
+            <div class="row"><input type="range" id="vTemperature" min="0" max="1" step="0.1" /><span class="mono readout" id="vTemperatureVal">0.2</span></div>
+            <label>detail</label>
+            <select id="vDetail">
+              <option value="auto">auto(默认)</option>
+              <option value="high">high</option>
+              <option value="original">original</option>
+              <option value="low">low(更快更省)</option>
+            </select>
+          </div>
+          <div class="result hidden" id="connResult"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">识别参数</div>
+          <div class="form-grid">
+            <label>定位置信度阈值</label>
+            <div class="row"><input type="range" id="vMinConf" min="0" max="1" step="0.05" /><span class="mono readout" id="vMinConfVal">0.70</span></div>
+            <label>视觉超时(s)</label>
+            <input type="number" id="vTimeout" min="5" max="120" step="1" />
+            <label>点击后等待校验(s)</label>
+            <div class="row"><input type="number" id="vVerifyDelay" min="0.3" max="15" step="0.1" /><span class="muted">结果弹窗要等服务端,建议 2~3 秒</span></div>
+            <label>模拟鼠标移动轨迹</label>
+            <label class="check"><input type="checkbox" id="vHumanize" /><span>启用(默认关闭,直接点击)</span></label>
+          </div>
+          <p class="hint">置信度低于阈值时不会点击,会计为一次未成功并进入重试流程。</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">判定词表(命中即视为成功 / 已领 / 失败)</div>
+          <div class="chips-block">
+            <div class="chips-label">成功词</div>
+            <div class="chips" id="successChips"></div>
+            <input type="text" id="successInput" class="chip-input" placeholder="输入后按回车添加,如:领取成功" />
+          </div>
+          <div class="chips-block">
+            <div class="chips-label">已领词</div>
+            <div class="chips" id="claimedChips"></div>
+            <input type="text" id="claimedInput" class="chip-input" placeholder="输入后按回车添加,如:明日再来" />
+          </div>
+          <div class="chips-block">
+            <div class="chips-label">失败词</div>
+            <div class="chips" id="failureChips"></div>
+            <input type="text" id="failureInput" class="chip-input" placeholder="输入后按回车添加,如:领取失败" />
+          </div>
+          <p class="hint">词表只在模型返回的结构化字段(keywords / ocr_texts / 按钮文字)上匹配,不会命中模型的解释性文字。</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">测试识别 <span class="muted">只跑一次视觉,不会点击</span></div>
+            <div class="row">
+              <select id="locateSource">
+                <option value="window">截取 ZCode 窗口</option>
+                <option value="screen">截取整屏</option>
+              </select>
+              <button class="btn primary" id="btnTestLocate">开始测试</button>
+            </div>
+          </div>
+          <div class="hidden" id="locateResult">
+            <div class="muted mono" id="locateMeta"></div>
+            <div class="locate-wrap" id="locateImageWrap">
+              <img id="locateImage" alt="测试截图" />
+              <div class="locate-box hidden" id="locateBox"></div>
+            </div>
+            <pre class="json" id="locateJson"></pre>
+          </div>
+        </div>
+
+        <div class="panel">
+          <details>
+            <summary class="panel-title">识别提示词(只读)</summary>
+            <h4>定位 Prompt</h4><pre class="json" id="locatePromptText"></pre>
+            <h4>校验 Prompt</h4><pre class="json" id="verifyPromptText"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- ============ 运行日志 ============ -->
+      <section id="page-logs" class="page hidden">
+        <div class="logs-layout">
+          <div class="panel sessions">
+            <div class="panel-head">
+              <div class="panel-title">场次记录</div>
+              <button class="btn small ghost" id="refreshSessions">
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.4-5.9M21 4.5v5h-5"/></svg>
+                <span>刷新</span>
+              </button>
+            </div>
+            <div id="sessionList" class="session-list"></div>
+            <div class="empty hidden" id="sessionEmpty">暂无场次记录</div>
+          </div>
+          <div class="panel detail">
+            <div class="panel-title">尝试详情</div>
+            <div id="sessionDetail" class="session-detail"><div class="empty">在左侧选择一条记录查看回放</div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">实时日志</div>
+            <div class="row">
+              <input type="text" id="logFilter" placeholder="过滤关键词" />
+              <button class="btn small ghost" id="clearLiveLog">清屏</button>
+            </div>
+          </div>
+          <div id="liveLog" class="live-log"></div>
+        </div>
+      </section>
+
+      <!-- ============ 设置 ============ -->
+      <section id="page-settings" class="page hidden">
+        <div class="panel">
+          <div class="panel-title">程序与 ZCode</div>
+          <div class="form-grid">
+            <label>ZCode 程序路径</label>
+            <div class="row">
+              <input type="text" id="sZcodePath" placeholder="留空则自动探测" />
+              <button class="btn small" id="btnDetect">自动探测</button>
+            </div>
+            <label>窗口标题匹配</label>
+            <input type="text" id="sTitleMatch" placeholder="ZCode" />
+            <label>执行前全屏显示</label>
+            <label class="check"><input type="checkbox" id="sFullscreen" /><span>把客户端最大化后再截图(推荐,识别更稳)</span></label>
+            <label>启动后等待加载(s)</label>
+            <input type="number" id="sStartupWait" min="0" max="60" step="0.5" />
+            <label>每次复位窗口位置</label>
+            <label class="check"><input type="checkbox" id="sRestore" /><span>未启用全屏时:执行前把窗口移到固定位置</span></label>
+            <label>窗口位置 x / y / 宽 / 高</label>
+            <div class="row">
+              <input type="number" id="sRectX" class="num" /><input type="number" id="sRectY" class="num" />
+              <input type="number" id="sRectW" class="num" /><input type="number" id="sRectH" class="num" />
+            </div>
+          </div>
+          <div class="result hidden" id="detectResult"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">重试与节奏 <span class="muted">全局默认,场次可单独覆盖</span></div>
+          <div class="form-grid">
+            <label>最多尝试次数</label><input type="number" id="rAttempts" min="1" max="20" />
+            <label>失败后重试间隔(s)</label><input type="number" id="rGap" min="1" max="120" />
+            <label>等待客户端启动(s)</label><input type="number" id="rOpenTimeout" min="5" max="180" />
+            <label>窗口就绪后静置(s)</label><input type="number" id="rSettle" min="0" max="30" step="0.5" />
+            <label>截图前置顶等待(s)</label><input type="number" id="rFocusSettle" min="0" max="5" step="0.1" />
+            <label>界面渲染等待上限(s)</label>
+            <div class="row"><input type="number" id="rAppReady" min="0" max="120" step="1" /><span class="muted">加载期纯色画面会自动等待,不算锁屏</span></div>
+            <label>结果弹窗渲染上限(s)</label><input type="number" id="rVerifyReady" min="0" max="60" step="1" />
+            <label>单场看门狗超时(s)</label><input type="number" id="rWatchdog" min="30" max="900" />
+            <label>场次执行期防休眠</label>
+            <label class="check"><input type="checkbox" id="sKeepAwake" /><span>启用(建议同时关闭系统睡眠)</span></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">通知</div>
+          <div class="form-grid">
+            <label>Windows 桌面通知</label>
+            <label class="check"><input type="checkbox" id="sNotifyDesktop" /><span>成功静默展示,失败必发</span></label>
+            <label>Webhook(可选)</label>
+            <input type="text" id="sWebhook" placeholder="Server酱 / 企业微信机器人 URL" />
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">数据</div>
+          <div class="form-grid">
+            <label>截图/日志保留天数</label><input type="number" id="sKeepDays" min="1" max="90" />
+            <label>数据目录</label>
+            <div class="row"><span class="mono muted" id="configPathText"></span><button class="btn small" id="btnOpenDataDir">打开目录</button></div>
+          </div>
+        </div>
+
+        <div class="panel danger">
+          <div class="panel-title">危险区</div>
+          <div class="row wrap">
+            <button class="btn danger" id="btnClearShots">清除全部截图</button>
+            <button class="btn danger" id="btnClearLogs">清空日志</button>
+            <button class="btn danger" id="btnReset">重置配置为默认</button>
+            <button class="btn danger" id="btnQuit">退出程序</button>
+          </div>
+          <p class="hint">重置配置会保留已填写的 ZCode 路径与 API Key。退出程序会同时中断正在执行的领取。</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<div id="lightbox" class="lightbox hidden">
+  <img id="lightboxImg" alt="截图" />
+  <div class="lightbox-hint">点击任意处关闭(Esc)</div>
+</div>
+
+<div id="confirmMask" class="mask hidden">
+  <div class="dialog" role="dialog" aria-modal="true">
+    <div class="dialog-text" id="confirmText"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="confirmCancel">取消</button>
+      <button class="btn danger solid" id="confirmOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/api.js"></script>
+<script src="assets/js/events.js"></script>
+<script src="assets/js/vendor/gsap.min.js"></script>
+<script src="assets/js/motion.js"></script>
+<script src="assets/js/pages/dashboard.js"></script>
+<script src="assets/js/pages/flow.js"></script>
+<script src="assets/js/pages/schedule.js"></script>
+<script src="assets/js/pages/vision.js"></script>
+<script src="assets/js/pages/logs.js"></script>
+<script src="assets/js/pages/settings.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
