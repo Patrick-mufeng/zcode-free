@@ -80,15 +80,45 @@ def build_app():
 def main() -> int:
     args = parse_args()
     set_dpi_awareness()
+
+    # 单实例:两个实例会各自按场次触发,同一场次领取两次,还会互抢前台窗口
+    from core.single_instance import acquire as acquire_single_instance
+    from core.single_instance import release as release_single_instance
+
+    if not acquire_single_instance():
+        # 这里还没建好日志/配置,只能用最朴素的方式提示用户
+        msg = "ZCode 福利助手已经在运行中(同一时间只允许一个实例)。\n\n请在浏览器打开面板,或先结束已有的那个实例。"
+        try:
+            ctypes.windll.user32.MessageBoxW(None, msg, "ZCode 福利助手", 0x40)
+        except Exception:
+            print(msg)
+        return 1
+
+    try:
+        return _run(args)
+    finally:
+        release_single_instance()
+
+
+def _run(args) -> int:
     cfg, bus, store, vision, runner, scheduler, api = build_app()
     from loguru import logger
     from core.server import serve
     from core.zcode_ctrl import release_stuck_modifiers
+    from core import awake
 
     # 旧版本在置前失败时会把 ALT 卡在按下态,拖累整台机器的键鼠输入;启动时兜底清一次
     released = release_stuck_modifiers()
     if released:
         logger.warning(f"已清理残留的按键状态:{'/'.join(released)}(不清会导致键盘/鼠标输入错乱)")
+
+    # 防休眠:默认常开。系统睡了调度器会跟着挂起,到点根本不会触发。
+    keep_awake = bool(cfg.get("schedule", "keep_awake", default=True))
+    if keep_awake:
+        if awake.set_always(True):
+            logger.info("已开启防休眠(系统与显示器保持唤醒;锁屏仍需在系统设置里关掉)")
+        else:
+            logger.warning("防休眠开启失败,系统可能按原设置进入睡眠")
 
     if args.dry_run:
         cfg.patch({"app": {"dry_run": True}})

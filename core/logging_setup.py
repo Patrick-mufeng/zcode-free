@@ -51,7 +51,10 @@ def get_logs(limit: int = 300, level: str | None = None, keyword: str = "") -> l
 
 def setup_logging(bus: EventBus | None = None, keep_days: int = 7, level: str = "INFO") -> None:
     logger.remove()
-    logger.add(sys.stderr, level=level, format=_FMT_CONSOLE, colorize=True)
+    # 打包成 --windowed 后 sys.stderr 是 None,挂控制台输出会直接抛异常;
+    # 日志本身仍会写文件,控制台只是额外的一份。
+    if sys.stderr is not None:
+        logger.add(sys.stderr, level=level, format=_FMT_CONSOLE, colorize=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger.add(
         LOG_DIR / "app-{time:YYYY-MM-DD}.log",

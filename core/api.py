@@ -8,6 +8,7 @@ import base64
 import os
 import threading
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -147,6 +148,14 @@ class Api:
         if patch:
             self.cfg.patch(patch)
             self.scheduler.reload()
+            # 「场次执行期防休眠」是常驻开关,改完要立刻生效,不能等下次启动
+            if isinstance(patch.get("schedule"), dict) and "keep_awake" in patch["schedule"]:
+                import core.awake as awake
+                want = bool(patch["schedule"]["keep_awake"])
+                if awake.set_always(want):
+                    logger.info(f"防休眠已{'开启' if want else '关闭'}")
+                else:
+                    logger.warning("切换防休眠失败,系统可能按原设置进入睡眠")
             self.bus.publish("state_change", {})
         return {"ok": True, "settings": self.get_settings()}
 
@@ -189,6 +198,46 @@ class Api:
             logger.info(f"已探测到 ZCode:{path}")
         return {"ok": bool(path), "path": path,
                 "message": f"已找到:{path}" if path else "未找到 ZCode.exe,请手动填写完整路径"}
+
+    def diagnose_shortcut(self, payload=None) -> dict:
+        """诊断开始菜单快捷方式的解析链路(打包后验证 win32com 是否可用)。
+
+        自动探测有两条路径:运行中进程(优先)与开始菜单 .lnk(兜底)。
+        客户端没运行时才会走后者,而它依赖函数内延迟导入的 win32com——
+        PyInstaller 容易漏掉。这里主动跑一次,把结论暴露给调用方。
+        """
+        import core.zcode_ctrl as zc
+
+        lnks: list[str] = []
+        for d in zc._start_menu_dirs():
+            try:
+                lnks.extend(str(p) for p in d.rglob("*.lnk") if "zcode" in p.stem.lower())
+            except OSError:
+                continue
+
+        result = {
+            "ok": False,
+            "shortcuts": lnks,
+            "resolved": None,
+            "message": "",
+        }
+        if not lnks:
+            result["message"] = "本机开始菜单里没有 ZCode 快捷方式,该链路不会被用到"
+            return result
+
+        target = zc._resolve_lnk(Path(lnks[0]))
+        if target:
+            result["ok"] = True
+            result["resolved"] = target
+            result["message"] = f"快捷方式解析正常:{target}"
+            logger.info(f"快捷方式解析正常:{lnks[0]} → {target}")
+        else:
+            result["message"] = (
+                "快捷方式解析失败(win32com 可能未打包)。"
+                "客户端正在运行时不影响使用;未运行时会探测不到 ZCode 路径。"
+            )
+            logger.warning("快捷方式解析失败:.lnk 链路不可用")
+        return result
 
     def test_vision_connection(self, payload=None) -> dict:
         result = self.vision.test_connection()

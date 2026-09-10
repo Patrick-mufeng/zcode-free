@@ -55,6 +55,10 @@ def main() -> int:
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
     check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
     check("HTTP 桥往返(get_state / 首页 / 静态资源)", lambda: __http_case())
+    check("打包:冻结路径分流(资源 / 数据分离)", lambda: __frozen_path_case())
+    check("打包:单实例锁(第二个实例必须被拒)", lambda: __single_instance_case())
+    check("打包:防休眠(开关 / 执行期嵌套计数)", lambda: __awake_case())
+    check("打包:开始菜单快捷方式解析(win32com 链路)", lambda: __shortcut_resolve_case())
     print()
     for line in PASS:
         print(line)
@@ -864,6 +868,168 @@ def __http_case():
     assert post("ui_ready", None)["result"]["ok"] is True
     assert api.ui_ready_event.is_set(), "ui_ready 未生效"
     return "RPC / 静态资源 / SSE / 目录穿越防护全部正常"
+
+
+def __frozen_path_case():
+    """冻结路径分流:打包后资源从 _MEIPASS 读、数据写到 exe 同级。
+
+    不真的打包,而是用一个隔离进程把 sys.frozen / sys._MEIPASS 造出来,
+    再 import core.config,验证路径常量落在预期位置。
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from core.config import FROZEN, UI_DIR, DATA_DIR
+
+    # 源码运行:FROZEN 为假,资源与数据都在项目根下
+    assert FROZEN is False, "源码运行时 FROZEN 应为 False"
+    assert UI_DIR.name == "ui" and UI_DIR.is_dir(), f"UI_DIR 不对:{UI_DIR}"
+    expected_data = Path(__file__).resolve().parent / "data"
+    assert DATA_DIR == expected_data, f"源码运行的 DATA_DIR 应为项目 data/:{DATA_DIR}"
+
+    # 打包运行:在子进程里伪造 frozen 环境。
+    # 子进程代码写到临时文件再执行,避免多层引号/转义把脚本拼坏。
+    with tempfile.TemporaryDirectory() as tmp:
+        meipass = Path(tmp) / "meipass"
+        exe_dir = Path(tmp) / "exe"
+        (meipass / "ui").mkdir(parents=True)
+        (meipass / "ui" / "index.html").write_text("x", encoding="utf-8")
+        exe_dir.mkdir(parents=True)
+
+        script = exe_dir / "check.py"
+        script.write_text(
+            "import sys, pathlib\n"
+            "sys.frozen = True\n"
+            f"sys._MEIPASS = {str(meipass)!r}\n"
+            f"sys.executable = {str(exe_dir / 'ZCode.exe')!r}\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "from core import config as c\n"
+            "assert c.FROZEN is True, 'FROZEN 未生效'\n"
+            f"assert c.UI_DIR == pathlib.Path({str(meipass / 'ui')!r}), f'UI_DIR 应为 _MEIPASS/ui: {{c.UI_DIR}}'\n"
+            f"assert c.DATA_DIR == pathlib.Path({str(exe_dir / 'data')!r}), f'DATA_DIR 应为 exe 同级 data/: {{c.DATA_DIR}}'\n"
+            "assert c.CONFIG_PATH.parent == c.DATA_DIR, 'CONFIG_PATH 应落在 DATA_DIR 内'\n"
+            "assert c.LOG_DIR.parent == c.DATA_DIR, '日志目录应落在 DATA_DIR 内'\n"
+            "assert c.SHOTS_DIR.parent == c.DATA_DIR, '截图目录应落在 DATA_DIR 内'\n"
+            "print('ok')\n",
+            encoding="utf-8",
+        )
+        proc = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=90)
+        assert proc.returncode == 0, f"冻结路径模拟失败:{proc.stderr.strip()[-300:]}"
+        assert "ok" in proc.stdout, f"子进程输出异常:{proc.stdout!r}"
+
+    return "源码与冻结两种模式路径均正确(资源 _MEIPASS / 数据 exe 同级)"
+
+
+def __single_instance_case():
+    """单实例锁:同进程重复 acquire 幂等;跨进程第二个必须被拒。
+
+    父进程持锁期间子进程应拿不到;释放后子进程应能拿到。
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from core import single_instance as si
+
+    if sys.platform != "win32":
+        assert si.acquire() is True
+        si.release()
+        return "非 Windows 平台:跳过多实例校验(acquire 恒放行)"
+
+    assert si.acquire() is True, "首次 acquire 应成功"
+    assert si.acquire() is True, "同进程重复 acquire 应幂等返回 True"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        script = Path(tmp) / "child.py"
+        script.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+            "from core.single_instance import acquire\n"
+            "print('ACQUIRED' if acquire() else 'BLOCKED')\n",
+            encoding="utf-8",
+        )
+        blocked = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=90)
+        assert blocked.returncode == 0, f"子进程执行失败:{blocked.stderr.strip()[-200:]}"
+        assert "BLOCKED" in blocked.stdout, f"已有实例时子进程不应拿到锁,实际:{blocked.stdout!r}"
+
+        si.release()
+        free = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=90)
+        assert "ACQUIRED" in free.stdout, f"释放后子进程应能拿到锁,实际:{free.stdout!r}"
+
+    return "同进程幂等;跨进程占用时被拒、释放后可获得"
+
+
+def __awake_case():
+    """防休眠:开关语义、execution 嵌套计数、以及真的会调用系统 API。
+
+    会短暂调用 SetThreadExecutionState(改的是"本进程所在线程"的执行状态,
+    进程退出即失效,不影响系统设置),调用后立刻复位。
+    """
+    from core import awake
+
+    if sys.platform != "win32":
+        assert awake.is_active() is False
+        return "非 Windows 平台:仅验证状态机(调用直接返回 False)"
+
+    # 初始:未保活
+    awake.set_always(False)
+    assert awake.is_active() is False, "初始应为未保活"
+
+    # always 模式:开启 → 激活;关闭 → 失活
+    assert awake.set_always(True) is True, "set_always(True) 应成功调用系统 API"
+    assert awake.is_active() is True, "always 开启后应处于保活"
+    assert awake.set_always(False) is True, "set_always(False) 应成功"
+    assert awake.is_active() is False, "always 关闭后应失活"
+
+    # execution 模式:嵌套计数,内层退出不应提前解除
+    awake.start_execution()
+    assert awake.is_active() is True, "进入执行应保活"
+    awake.start_execution()
+    awake.stop_execution()
+    assert awake.is_active() is True, "仍有外层嵌套时不应解除保活"
+    awake.stop_execution()
+    assert awake.is_active() is False, "全部退出后应解除保活"
+    awake.stop_execution()          # 多余调用不应把计数弄成负数
+    assert awake.is_active() is False, "多余 stop 后仍应失活"
+
+    # always 与 execution 叠加:always 开着时,执行结束不该解除保活
+    awake.set_always(True)
+    awake.start_execution()
+    awake.stop_execution()
+    assert awake.is_active() is True, "always 模式开着时,执行结束应继续保活"
+    awake.set_always(False)
+    assert awake.is_active() is False
+
+    return "always 开关 / execution 嵌套计数正确,且确实调用了 SetThreadExecutionState"
+
+
+def __shortcut_resolve_case():
+    """开始菜单 .lnk 解析(win32com 延迟导入链路)。
+
+    打包后 win32com 若漏打,自动探测会静默退化成"找不到 ZCode";
+    这里直接调用解析函数,确认该链路在本机可用。
+    本机没有 ZCode 快捷方式时跳过(那种情况下这条链路本来就不参与)。
+    """
+    from pathlib import Path
+
+    import core.zcode_ctrl as zc
+
+    lnks = []
+    for d in zc._start_menu_dirs():
+        try:
+            lnks.extend(p for p in d.rglob("*.lnk") if "zcode" in p.stem.lower())
+        except OSError:
+            continue
+
+    if not lnks:
+        return "本机开始菜单无 ZCode 快捷方式,跳过该项(不影响使用)"
+
+    target = zc._resolve_lnk(lnks[0])
+    assert target, f"快捷方式解析失败:{lnks[0]}(win32com 可能不可用)"
+    assert target.lower().endswith(".exe"), f"解析结果不是 exe:{target}"
+    assert Path(target).is_file(), f"解析出的路径不存在:{target}"
+    return f"快捷方式解析正常:{lnks[0].name} → {target}"
 
 
 if __name__ == "__main__":

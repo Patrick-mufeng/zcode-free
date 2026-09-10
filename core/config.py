@@ -1,21 +1,56 @@
 """配置管理:data/config.yaml 与默认值深度合并,线程安全读写。
 
 配置结构见技术方案 §8。UI 每次修改走 patch() 即时落盘。
+
+路径分两种,打包后必须分开:
+  资源(ui/)      从解包目录 sys._MEIPASS 读,只读
+  数据(data/)    写到 exe 同级目录,保证重启后配置还在;不可写时回退 LOCALAPPDATA
+源码运行时两者都在项目根目录下,行为与以前完全一致。
 """
 from __future__ import annotations
 
 import copy
+import os
+import sys
 import threading
 from pathlib import Path
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data"
+FROZEN = getattr(sys, "frozen", False)
+
+
+def _writable(path: Path) -> bool:
+    """目录是否可写(不存在则看父目录能否创建)。"""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-test"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+if FROZEN:
+    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    _exe_dir = Path(sys.executable).parent
+    DATA_DIR = _exe_dir / "data"
+    if not _writable(DATA_DIR):
+        # exe 放在 Program Files 等只读位置时,退到用户目录
+        _fallback = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ZCode福利助手" / "data"
+        DATA_DIR = _fallback if _writable(_fallback) else DATA_DIR
+    # 打包后没有"项目根",保留同名常量指向 exe 所在目录(仅开发期工具引用)
+    PROJECT_ROOT = _exe_dir
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    RESOURCE_DIR = PROJECT_ROOT
+    DATA_DIR = PROJECT_ROOT / "data"
+
 CONFIG_PATH = DATA_DIR / "config.yaml"
 LOG_DIR = DATA_DIR / "logs"
 SHOTS_DIR = DATA_DIR / "shots"
-UI_DIR = PROJECT_ROOT / "ui"
+UI_DIR = RESOURCE_DIR / "ui"
 
 DEFAULTS: dict = {
     "app": {

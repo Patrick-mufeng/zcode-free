@@ -13,6 +13,7 @@ from pathlib import Path
 
 from loguru import logger
 
+import core.awake as awake
 import core.capture as capture
 import core.clicker as clicker
 import core.validate as validate
@@ -56,12 +57,15 @@ class Runner:
         if not self._lock.acquire(blocking=False):
             logger.warning("已有领取任务在执行,忽略本次触发")
             return None
+        # 执行期间额外保活一次:即使配置成非常驻,跑的这一段也不会睡
+        awake.start_execution()
         try:
             return self._run(trigger, slot)
         except Exception as exc:
             logger.exception(f"领取流程异常终止:{exc}")
             return None
         finally:
+            awake.stop_execution()
             self.current = None
             self._client_pid = None
             self._client_exe = ""
