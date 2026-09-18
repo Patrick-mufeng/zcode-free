@@ -18,7 +18,7 @@ from core.config import CONFIG_PATH, DATA_DIR, LOG_DIR, ConfigStore
 from core.events import EventBus
 from core.logging_setup import get_logs
 from core.runner import Runner
-from core.scheduler import SlotScheduler, parse_hhmm
+from core.scheduler import SlotScheduler, parse_days, parse_hhmm
 from core.storage import SessionStore
 from core.validate import normalize_box
 from core.vision import LOCATE_PROMPT, VERIFY_PROMPT, VisionClient
@@ -108,24 +108,32 @@ class Api:
     @staticmethod
     def _clean_slots(raw) -> list[dict]:
         out: list[dict] = []
-        seen: set[str] = set()
+        seen: set[tuple] = set()
         for item in raw or []:
             if not isinstance(item, dict):
                 continue
             time_text = str(item.get("time") or "").strip()
-            if parse_hhmm(time_text) is None or time_text in seen:
+            if parse_hhmm(time_text) is None:
                 continue
-            seen.add(time_text)
+            # days 为空表示每天;同一时间可以排在不同星期(如周五 19:00 与周六 19:00),
+            # 所以去重键是「时间 + 星期」而不是时间本身
+            days = parse_days(item.get("days"))
+            key = (time_text, tuple(days) if days else ())
+            if key in seen:
+                continue
+            seen.add(key)
             entry: dict = {"time": time_text, "enabled": bool(item.get("enabled", True))}
-            for key in ("attempts", "retry_gap_s"):
-                value = item.get(key)
+            if days:
+                entry["days"] = days
+            for key_name in ("attempts", "retry_gap_s"):
+                value = item.get(key_name)
                 if value in (None, "", "null"):
-                    entry[key] = None
+                    entry[key_name] = None
                 else:
                     try:
-                        entry[key] = max(1, int(float(value)))
+                        entry[key_name] = max(1, int(float(value)))
                     except (TypeError, ValueError):
-                        entry[key] = None
+                        entry[key_name] = None
             out.append(entry)
         return out
 

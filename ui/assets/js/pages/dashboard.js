@@ -47,7 +47,15 @@
     refresh(state) {
       const next = state.next_slot;
       $('cardNext').textContent = next ? next.label : '--';
-      $('cardNextSub').textContent = next ? next.datetime : (state.slots_enabled ? '今天已无场次' : '未配置场次');
+      // 场次可以只排在部分星期,所以这里必须带出日期与星期,
+      // 否则「19:00」看起来像今天,实际可能是下周五
+      if (!next) {
+        $('cardNextSub').textContent = state.slots_enabled ? '已无待执行场次' : '未配置场次';
+      } else if (next.is_today) {
+        $('cardNextSub').textContent = `今天 ${next.weekday} · ${next.datetime}`;
+      } else {
+        $('cardNextSub').textContent = `${next.date} ${next.weekday} · ${next.datetime}`;
+      }
 
       // 数字卡片走显式滚动动画(只对纯数字生效),不再靠观察自身文字变化
       // 本周福利:一周只有一次机会,这里显示窗口状态与是否已领取。

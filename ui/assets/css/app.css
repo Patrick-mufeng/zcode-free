@@ -389,11 +389,10 @@ main {
 .panel.grow > .json { flex: 1 1 auto; max-height: none; }
 .panel.grow > .live-log { min-height: 96px; }
 
-/* 表格保持自然行高:靠并排布局填满页面,而不是把行距拉大 */
+/* 表格保持自然行高:靠内容填满页面,而不是把行距拉大 */
 .panel.grow > .table { flex: 0 0 auto; }
-.two-col > .panel > .table { flex: 0 0 auto; }
 /* 表格下方的提示与空状态不参与拉伸,残留空间交给容器吸收 */
-.two-col > .panel > .hint { margin-top: auto; }
+.panel > .hint { margin-top: auto; }
 
 /* 场次表:行少时靠"行高略宽 + 说明贴底"消化剩余空间,而不是留一块空 */
 #slotTable td { padding-top: 11px; padding-bottom: 11px; }
@@ -700,6 +699,38 @@ main {
 .table input[type="time"] { max-width: 104px; }
 .table input:focus { border-color: var(--amber); outline: none; }
 .table input::placeholder { color: var(--t3); }
+
+/* 场次表里的星期选择:一排小方块。全灰(.all)表示「每天」——
+   这是一个三态控件(每天 / 部分星期 / 无),所以用 .on 表示"仅这些星期" */
+.days {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.days .day {
+  width: 27px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--hair-2);
+  border-radius: 4px;
+  color: var(--t3);
+  font: 11px var(--mono);
+  cursor: pointer;
+  transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease);
+}
+.days .day:hover { border-color: var(--amber); color: var(--t2); }
+.days .day.on {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  color: #EFC177;
+}
+/* 「每天」态:按钮看起来是"未选中",但整体不显得像坏掉的控件 */
+.days .day.all { border-style: solid; border-color: var(--hair); color: var(--t3); }
+.days .day.all:hover { border-color: var(--amber); }
 
 /* 统一的自绘勾选框(表格 / 表单共用外观) */
 .table input[type="checkbox"],
@@ -1044,18 +1075,8 @@ input[type="range"]::-webkit-slider-thumb {
 .prompts h4 { margin: 0 0 5px; font-size: 11.5px; font-weight: 600; color: var(--t2); }
 
 /* 测试识别:没跑测试时的占位,避免空出一整块面板 */
-/* 通用两栏:把"一个高一个矮"的两块内容并排,避免纵向堆出空白 */
-.two-col {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--gap);
-  align-items: stretch;
-  flex: 1 1 0;            /* 吃掉页高,两栏不会只占上半屏 */
-  min-height: 0;
-}
-.two-col > .panel { min-width: 0; display: flex; flex-direction: column; }
 
-/* 未来 7 天:在窄栏里按行排列,而不是被压成 7 个细条 */
+/* 未来 7 天:按行排列,每行一天 */
 .week-rows { display: flex; flex-direction: column; gap: 5px; flex: 1 1 0; min-height: 0; }
 .week-rows .week-row {
   flex: 1 1 0;
@@ -1321,7 +1342,6 @@ details[open] > summary::before { content: "▾ "; }
 @media (max-width: 1040px) {
   .dash-grid { grid-template-columns: minmax(0, 1fr); }
   .bottom-grid { grid-template-columns: minmax(0, 1fr); }
-  .two-col { grid-template-columns: minmax(0, 1fr); }
   .locate-placeholder { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .cards { grid-template-columns: minmax(0, 1fr); }
   .logs-layout { grid-template-columns: minmax(0, 1fr); }

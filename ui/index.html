@@ -308,11 +308,11 @@
 
       <!-- ================= 03 场次表 ================= -->
       <section id="page-schedule" class="page hidden">
-        <div class="two-col">
-          <div class="panel">
+        <div class="dash-grid">
+          <div class="panel wide">
             <div class="section-head">
-              <span class="sec-idx">每日固定场次</span>
-              <span class="sec-note">留空表示继承全局默认(设置页)</span>
+              <span class="sec-idx">场次表</span>
+              <span class="sec-note">默认每天;可只勾选特定星期(如只排周五/周六/周日)</span>
               <span class="spacer"></span>
               <button class="btn small" id="addSlot" type="button">添加场次</button>
             </div>
@@ -320,6 +320,7 @@
               <thead><tr>
                 <th style="width:64px">启用</th>
                 <th style="width:118px">时间</th>
+                <th style="width:232px">重复</th>
                 <th style="width:130px">尝试次数</th>
                 <th style="width:138px">重试间隔(s)</th>
                 <th>最近结果</th>
@@ -329,19 +330,19 @@
             </table>
             <div class="empty hidden" id="slotEmpty">还没有场次,点右上角「添加场次」创建第一场</div>
             <div class="slot-foot">
-              <span>修改后立即保存并生效,调度器热重载,无需重启。</span>
+              <span>修改后立即保存并生效,调度器热重载,无需重启。「重复」列不点亮任何星期表示每天。</span>
               <span class="spacer"></span>
               <span class="mono" id="slotCount">0 个场次</span>
             </div>
           </div>
 
-          <div class="panel">
+          <div class="panel wide">
             <div class="section-head">
               <span class="sec-idx">未来 7 天预览</span>
-              <span class="sec-note">按启用中的场次推算</span>
+              <span class="sec-note">按启用中的场次与各自勾选的星期推算</span>
             </div>
             <div id="weekPreview" class="week week-rows"></div>
-            <p class="hint">列表里列出的时间就是届时会被触发的场次;未启用的场次不会出现在这里。</p>
+            <p class="hint">列表里列出的时间就是届时会被触发的场次;未启用的场次、以及星期不匹配的日子都不会出现在这里。</p>
           </div>
         </div>
       </section>

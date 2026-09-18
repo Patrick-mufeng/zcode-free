@@ -56,6 +56,7 @@ def main() -> int:
     check("执行器:福利卡片缺失时收敛(不反复重开客户端)", lambda: __no_card_case())
     check("执行器:点击后加载中持续等待(不再提前判失败)", lambda: __verify_pending_case())
     check("每周一次机会(周期从周五起 / 已领则跳过后续场次)", lambda: __weekly_case())
+    check("场次按星期(每天 / 指定星期 / 误配置告警)", lambda: __weekday_slot_case())
     check("测试识别接口(整屏,无 Key 时报错而不抛异常)", lambda: __test_locate_case())
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
     check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
@@ -1445,6 +1446,98 @@ def __weekly_case():
     cfg.patch({"app": {"dry_run": False}})
 
     return "周期边界正确(周五开头);已领则跳过且不碰客户端;手动与演练不受限;成功后自动记账"
+
+
+def __weekday_slot_case():
+    """场次可只排在指定星期;老配置(无 days)必须继续按每天跑。
+
+    背景:场次表原来是「每日固定场次」,但实际只在周五六日用。少了星期维度就只能
+    把每天的场次都列上,周末之外的日子会白白触发。
+    """
+    import tempfile
+    from datetime import datetime
+    from pathlib import Path
+
+    from core.api import Api
+    from core.config import ConfigStore
+    from core.scheduler import SlotScheduler, days_label, parse_days
+
+    # ① 星期解析:够宽容,但非法值不能悄悄变成"每天"而让人以为只排了周五
+    assert parse_days(None) is None and parse_days([]) is None, "空值应表示每天"
+    assert parse_days([4]) == [4], "整数星期解析错误"
+    assert parse_days(["4"]) == [4], "数字字符串应能解析"
+    assert parse_days([5, 6, 0]) == [0, 5, 6], "应升序去重"
+    assert parse_days(["mon", "fri"]) == [0, 4], "英文缩写应能解析"
+    assert parse_days(["周五", "周六"]) == [4, 5], "中文星期应能解析"
+    assert parse_days([1, 2, 3, 4, 5]) == [1, 2, 3, 4, 5], "1-7 写法(周一=1)应能解析"
+    assert parse_days([0, 1, 2, 3, 4, 5, 6]) is not None
+    assert days_label(None) == "每天" and days_label([4, 5, 6]) == "周五周六周日"
+    assert days_label([0, 1, 2, 3, 4, 5, 6]) == "每天", "全选等同每天"
+
+    # ② 保存链路:days 要落盘,且同一时间可排在不同星期
+    tmp = Path(tempfile.mkdtemp(prefix="zcode-days-"))
+    cfg = ConfigStore(tmp / "config.yaml")
+    api = Api.__new__(Api)
+    api.cfg = cfg
+    cleaned = Api._clean_slots([
+        {"time": "19:00", "enabled": True, "days": [4, 5, 6]},
+        {"time": "19:00", "enabled": True, "days": [0]},        # 同一时间、不同星期 → 两条都要留
+        {"time": "19:00", "enabled": True, "days": [4, 5, 6]},  # 完全重复 → 去掉
+        {"time": "21:00", "enabled": True},                     # 无 days → 每天
+        {"time": "25:00", "enabled": True, "days": [4]},        # 时间非法 → 丢掉
+    ])
+    assert len(cleaned) == 3, f"去重/校验有误:{cleaned}"
+    assert cleaned[0]["days"] == [4, 5, 6], f"days 未保存:{cleaned[0]}"
+    assert cleaned[1]["days"] == [0], "同一时间不同星期应各留一条"
+    assert "days" not in cleaned[2], "每天不应写入 days 字段(兼容老配置)"
+
+    # ③ 调度:只注册到指定星期,且「下一场」要能说清是哪天
+    cfg.patch({"schedule": {"slots": [
+        {"time": "19:00", "enabled": True, "days": [4, 5, 6]},
+        {"time": "08:30", "enabled": True},
+    ]}})
+    fired: list[dict] = []
+    sched = SlotScheduler(cfg, lambda slot: fired.append(slot), master_check=lambda: True)
+    sched.start()
+    try:
+        jobs = {j.id: j for j in sched._scheduler.get_jobs() if j.id.startswith("slot:")}
+        assert len(jobs) == 2, f"应注册 2 个场次:{list(jobs)}"
+        # 找到带星期的那个 job,确认 next_run 落在周五/六/日
+        nxt = sched.next_run()
+        assert nxt, "应能算出下一场"
+        assert "weekday" in nxt and "date" in nxt and "is_today" in nxt, \
+            f"下一场信息缺少日期/星期(场次不再每天都有):{nxt}"
+        # 08:30 那场每天都跑,所以最近的一场必是它;19:00 那场必须落在周五/六/日
+        day_jobs = [j for j in jobs.values() if j.next_run_time]
+        assert day_jobs, "应存在待触发任务"
+        for job in day_jobs:
+            if "1900" in job.id:
+                assert job.next_run_time.weekday() in (4, 5, 6), \
+                    f"限定周五六日的场次不该落在周{job.next_run_time.weekday()}"
+    finally:
+        sched.shutdown()
+
+    # ④ 补触发兜底:休眠后补触发到非设定星期时必须跳过,不真的去执行
+    today = datetime.now().weekday()
+    other = next(d for d in range(7) if d != today)
+    cfg.patch({"schedule": {"slots": [{"time": "19:00", "enabled": True, "days": [other]}]}})
+    sched2 = SlotScheduler(cfg, lambda slot: fired.append(slot), master_check=lambda: True)
+    sched2.start()
+    try:
+        fired.clear()
+        sched2._fire({"time": "19:00", "days": [other]})     # 模拟补触发到今天
+        assert not fired, f"非设定星期不该执行(今天周{today},设定周{other})"
+        # 设定今天时应当放行
+        sched2._fire({"time": "19:00", "days": [today]})
+        assert len(fired) == 1, "设定星期包含今天时应正常执行"
+        # 没有 days(每天)时任何一天都放行
+        fired.clear()
+        sched2._fire({"time": "20:00", "days": None})
+        assert len(fired) == 1, "每天型场次不该被星期兜底拦下"
+    finally:
+        sched2.shutdown()
+
+    return "星期解析容错;days 落盘且同时间可排多星期;调度只在指定星期触发;补触发兜底生效"
 
 
 if __name__ == "__main__":

@@ -108,7 +108,13 @@
     }
     dot.className = 'dot ' + cls;
     text.textContent = label;
-    $('nextSlot').textContent = state.next_slot ? state.next_slot.label : '--';
+    // 顶栏的「下一场」:场次可以只排在某些星期,所以要带出是哪天
+    if (!state.next_slot) {
+      $('nextSlot').textContent = '--';
+    } else {
+      const n = state.next_slot;
+      $('nextSlot').textContent = n.is_today ? n.label : `${n.date} ${n.label}(${n.weekday})`;
+    }
     const busy = !!(state.running || execRunning);
     $('master').checked = !!state.master;
     $('master').disabled = busy;
