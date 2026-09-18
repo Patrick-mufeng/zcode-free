@@ -12,6 +12,7 @@
   let successKeywords = [];
   let claimedKeywords = [];
   let failureKeywords = [];
+  let loadingKeywords = [];
   let loading = false;
 
   function collectVision() {
@@ -49,6 +50,10 @@
     renderChipSet('failureChips', failureKeywords, (list) => {
       failureKeywords = list;
       saveVision({ failure_keywords: list });
+    });
+    renderChipSet('loadingChips', loadingKeywords, (list) => {
+      loadingKeywords = list;
+      saveVision({ loading_keywords: list });
     });
   }
 
@@ -118,6 +123,7 @@
       bindChipInput('successInput', () => successKeywords, (list) => { successKeywords = list; }, 'success_keywords');
       bindChipInput('claimedInput', () => claimedKeywords, (list) => { claimedKeywords = list; }, 'claimed_keywords');
       bindChipInput('failureInput', () => failureKeywords, (list) => { failureKeywords = list; }, 'failure_keywords');
+      bindChipInput('loadingInput', () => loadingKeywords, (list) => { loadingKeywords = list; }, 'loading_keywords');
 
       $('btnTestConn').addEventListener('click', async () => {
         const box = $('connResult');
@@ -184,6 +190,7 @@
         successKeywords = data.success_keywords || [];
         claimedKeywords = data.claimed_keywords || [];
         failureKeywords = data.failure_keywords || [];
+        loadingKeywords = data.loading_keywords || [];
         const prompts = await window.API.call('get_prompts');
         $('locatePromptText').textContent = prompts.locate || '';
         $('verifyPromptText').textContent = prompts.verify || '';

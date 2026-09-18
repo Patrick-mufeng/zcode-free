@@ -46,13 +46,18 @@
     slots.forEach((slot, index) => {
       const result = lastResults[slot.time];
       const info = result ? window.UITL.statusInfo(result.status) : null;
+      // 只显示「今天」的记录:否则改完场次后,这一列还挂着上次触发的旧结果,
+      // 看起来像是刚失败/被跳过(实际是几天前那场的)
+      const detail = info
+        ? window.UITL.esc(info.text) + ' · ' + window.UITL.esc(window.UITL.dt(result.started_at))
+        : '<span class="muted">今日未执行</span>';
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><input type="checkbox" ${slot.enabled !== false ? 'checked' : ''} /></td>
         <td><input type="time" value="${window.UITL.esc(slot.time || '10:00')}" /></td>
         <td><input type="number" class="attempts" min="1" max="20" placeholder="默认" value="${slot.attempts != null ? slot.attempts : ''}" /></td>
         <td><input type="number" class="gap" min="1" max="120" placeholder="默认" value="${slot.retry_gap_s != null ? slot.retry_gap_s : ''}" /></td>
-        <td class="${info ? info.cls : 'muted'}">${info ? window.UITL.esc(info.text) + (result.started_at ? ' · ' + window.UITL.esc(window.UITL.dt(result.started_at)) : '') : '—'}</td>
+        <td class="${info ? info.cls : 'muted'}">${detail}</td>
         <td><button class="btn small danger" title="删除场次" aria-label="删除场次">删除</button></td>`;
       tr.querySelector('input[type="checkbox"]').addEventListener('change', () => save(true));
       tr.querySelector('input[type="time"]').addEventListener('change', () => save(true));
@@ -103,8 +108,14 @@
       try {
         const data = await window.API.call('list_sessions', { limit: 200 });
         lastResults = {};
+        const today = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
         (data && data.items ? data.items : []).forEach((item) => {
-          if (item.slot && !lastResults[item.slot]) lastResults[item.slot] = item;
+          // 只看今天的记录:历史场次的旧结果挂在这里会被误读成"刚刚又失败了"
+          if (!item.slot || lastResults[item.slot]) return;
+          if (!String(item.started_at || '').startsWith(todayStr)) return;
+          lastResults[item.slot] = item;
         });
       } catch (err) { lastResults = {}; }
       render();

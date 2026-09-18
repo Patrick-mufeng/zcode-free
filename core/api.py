@@ -166,6 +166,7 @@ class Api:
             "success_keywords": self.cfg.get("success_keywords") or [],
             "claimed_keywords": self.cfg.get("claimed_keywords") or [],
             "failure_keywords": self.cfg.get("failure_keywords") or [],
+            "loading_keywords": self.cfg.get("loading_keywords") or [],
         }
 
     def save_vision_config(self, payload=None) -> dict:
@@ -178,7 +179,7 @@ class Api:
             patch.setdefault("retry", {})["verify_delay_s"] = payload["verify_delay_s"]
         if "max_attempts" in payload:
             patch.setdefault("retry", {})["max_attempts"] = payload["max_attempts"]
-        for key in ("success_keywords", "claimed_keywords", "failure_keywords"):
+        for key in ("success_keywords", "claimed_keywords", "failure_keywords", "loading_keywords"):
             value = payload.get(key)
             if isinstance(value, list):
                 patch[key] = [str(k).strip() for k in value if str(k).strip()]
@@ -243,6 +244,30 @@ class Api:
         result = self.vision.test_connection()
         logger.info(f"视觉连接测试:{result.get('message')}")
         return result
+
+    def test_notify(self, payload=None) -> dict:
+        """发一条测试通知,把每个渠道的真实结果回报给面板。
+
+        webhook 失败在《设置》页原本是静默的(只写 debug 日志),用户只能干等;
+        这里直接返回失败原因,配错地址/密钥当场就能看出来。
+        """
+        payload = payload or {}
+        section = self.cfg.get("notify") or {}
+        if payload.get("url") is not None or payload.get("desktop") is not None:
+            # 允许用尚未保存的输入值直接试,免得"改一下→保存→试"来回折腾
+            if payload.get("url") is not None:
+                section = dict(section, webhook_url=str(payload.get("url") or "").strip())
+            if payload.get("desktop") is not None:
+                section = dict(section, desktop=bool(payload.get("desktop")))
+            self.cfg.patch({"notify": section})
+
+        from core import notify as notify_mod
+
+        title = "ZCode 福利助手 · 通知测试"
+        message = "如果你收到这条消息,说明通知链路已打通。"
+        results = notify_mod.send(self.cfg, title, message)   # type: ignore[attr-defined]
+        logger.info(f"通知测试:桌面={results.get('desktop')},webhook={results.get('webhook')}")
+        return {"ok": True, "results": results}
 
     def test_locate(self, payload=None) -> dict:
         cfg = self.cfg.all()

@@ -208,15 +208,16 @@
             <div class="flow-node" data-node="shot1"><i class="mono">03</i><b>截图</b><span>等渲染后按窗口裁图</span></div>
             <div class="flow-node" data-node="locate"><i class="mono">04</i><b>视觉定位</b><span>模型调用 ① 找按钮</span></div>
             <div class="flow-node" data-node="click"><i class="mono">05</i><b>点击领取</b><span>归一化 → 屏幕坐标</span></div>
-            <div class="flow-node" data-node="verify"><i class="mono">06</i><b>校验</b><span>模型调用 ② 看弹窗</span></div>
+            <div class="flow-node" data-node="verify"><i class="mono">06</i><b>等待结果</b><span>反复截图,直到出结果</span></div>
             <div class="flow-node" data-node="done"><i class="mono">07</i><b>收尾</b><span>留档 + 通知</span></div>
           </div>
           <div class="flow-branches">
             <div class="branch ok" data-branch="ok"><b>成功弹窗</b><span>领取成功 + 开始体验<br />截图留档 → 通知 → 保留窗口,等下一场</span></div>
-            <div class="branch retry" data-branch="retry"><b>失败弹窗</b><span>领取失败 + 知道了 / 未成功<br />关闭客户端 → 等 5 秒 → 重开重试(默认最多 5 次)</span></div>
+            <div class="branch retry" data-branch="retry"><b>失败弹窗</b><span>领取失败 + 知道了 / 等到上限仍无结果<br />关闭客户端 → 等 5 秒 → 重开重试(默认最多 5 次)</span></div>
             <div class="branch manual" data-branch="manual"><b>需人工</b><span>登录页 / 验证码 / 锁屏<br />立即停止本场 → 通知,不浪费重试次数</span></div>
           </div>
           <p class="hint">执行时节点会实时高亮:已完成转绿、当前步骤转琥珀、失败转红;下方分支会闪一下表示本次走了哪条路。</p>
+          <p class="hint">注意「等待结果」这一步可能要几十秒:点击后服务端要走发放流程,这期间界面停在加载动画上,不算失败,程序会继续复查。</p>
         </div>
 
         <div class="panel">
@@ -236,8 +237,8 @@
             <article class="stage">
               <header><i class="mono">02</i><b>定位 · 模型调用 ①</b><span class="muted">DeepSeek 视觉</span></header>
               <ul>
-                <li>输入:窗口图 + 定位 Prompt(要求只输出 JSON)</li>
-                <li>输出:scene / claimable / already_claimed / button_found / <b>button_box(归一化 0~1)</b> / ocr_texts / confidence / notes</li>
+                <li>目标不是「福利页」,而是<b>浮在界面上的推广卡片</b>:固定在窗口左下角,含 "ZCODE Weekend Build"、"300,000,000 Tokens",右下角有「领取」小按钮</li>
+                <li>输出:scene / claimable / <b>card_visible</b> / button_found / <b>button_box(归一化 0~1)</b> / ocr_texts / confidence / notes</li>
                 <li>结构化保障:Prompt 含 JSON 示例 + <code>response_format</code> + 本地 JSON 修复</li>
               </ul>
             </article>
@@ -246,15 +247,16 @@
               <ul>
                 <li>取 <code>button_box</code> 中心 → 归一化坐标</li>
                 <li>屏幕坐标 = 窗口矩形原点 + 归一化 × 矩形尺寸</li>
-                <li>pyautogui 点击(鼠标甩到左上角可急停),等 2.5 秒后校验</li>
+                <li>pyautogui 点击(鼠标甩到左上角可急停),再进入等待结果</li>
               </ul>
             </article>
             <article class="stage">
-              <header><i class="mono">04</i><b>校验 · 模型调用 ②</b><span class="muted">DeepSeek 视觉</span></header>
+              <header><i class="mono">04</i><b>等待结果 · 模型调用 ②</b><span class="muted">DeepSeek 视觉</span></header>
               <ul>
-                <li>结果以<b>弹窗</b>呈现:成功 =「领取成功 + 开始体验」,失败 =「领取失败 + 知道了」</li>
-                <li>再次置顶 + 截图,送入校验 Prompt</li>
-                <li>输出:success / failed / popup / keywords / confidence / notes</li>
+                <li>点击后<b>不立刻下结论</b>:在「等待领取结果上限」(默认 90s)内反复截图判定,直到出现明确结论</li>
+                <li>结果形态:成功 =「领取成功 + 开始体验」,失败 =「领取失败 + 知道了」,加载中 = 按钮转圈 / 含加载词</li>
+                <li>加载中<b>不算失败</b>,继续等;每张校验图都留档,可在运行日志里回放结果是怎么出来的</li>
+                <li>输出:success / failed / claimed / pending / card_visible / popup / keywords / confidence</li>
               </ul>
             </article>
           </div>
@@ -270,12 +272,15 @@
             <tbody>
               <tr><td class="mono">定位</td><td>场景 = 登录页 / 验证码等异常界面</td><td data-kind="manual">需人工,立即停止本场</td></tr>
               <tr><td class="mono">定位</td><td>已领标记为真,或命中「已领词」(如:明日再来)</td><td data-kind="ok">按已领取收尾,不再点击</td></tr>
-              <tr><td class="mono">定位</td><td>找到按钮 且 可领 且 置信度 ≥ 阈值(默认 0.70)</td><td>执行点击,进入校验</td></tr>
+              <tr><td class="mono">定位</td><td>找到按钮 且 可领 且 置信度 ≥ 阈值(默认 0.70)</td><td>执行点击,进入等待结果</td></tr>
+              <tr><td class="mono">定位</td><td>卡片不在画面上(本期已领完 / 活动未开放)</td><td data-kind="ok">复查确认后收尾,不再重启客户端</td></tr>
               <tr><td class="mono">定位</td><td>以上都不满足(没找到 / 置信度不足)</td><td data-kind="fail">未成功 → 关客户端重试</td></tr>
-              <tr><td class="mono">校验</td><td>成功弹窗:含「领取成功」或「开始体验」</td><td data-kind="ok">成功,留档 + 通知</td></tr>
-              <tr><td class="mono">校验</td><td>失败弹窗:含「领取失败」或「知道了」</td><td data-kind="fail">未成功 → 关客户端重试</td></tr>
-              <tr><td class="mono">校验</td><td>claimed 为真,或命中「已领词」</td><td data-kind="ok">按已领取收尾</td></tr>
-              <tr><td class="mono">校验</td><td>没有弹窗、与点击前无明显变化</td><td data-kind="fail">未成功 → 关客户端重试</td></tr>
+              <tr><td class="mono">等待</td><td>界面停在加载动画上,或命中「加载中词」</td><td>继续等待,不算失败</td></tr>
+              <tr><td class="mono">等待</td><td>成功弹窗:含「领取成功」或「开始体验」</td><td data-kind="ok">成功,留档 + 通知</td></tr>
+              <tr><td class="mono">等待</td><td>失败弹窗:含「领取失败」或「知道了」</td><td data-kind="fail">未成功 → 关客户端重试</td></tr>
+              <tr><td class="mono">等待</td><td>claimed 为真,或命中「已领词」</td><td data-kind="ok">按已领取收尾</td></tr>
+              <tr><td class="mono">等待</td><td>点过之后卡片整张消失(也没有弹窗)</td><td data-kind="ok">按已领取收尾,不再重复点击</td></tr>
+              <tr><td class="mono">等待</td><td>等到上限仍无结论 / 页面与点击前无变化</td><td data-kind="fail">未成功 → 关客户端重试</td></tr>
             </tbody>
           </table>
         </div>
@@ -407,10 +412,10 @@
               <input type="number" id="vTimeout" min="5" max="120" step="1" />
             </div>
             <div class="field">
-              <label for="vVerifyDelay">点击后等待校验(s)</label>
+              <label for="vVerifyDelay">首次校验前等待(s)</label>
               <div class="row">
                 <input type="number" id="vVerifyDelay" min="0.3" max="15" step="0.1" />
-                <span class="muted">建议 2~3 秒</span>
+                <span class="muted">出结果前会反复复查,上限见设置页</span>
               </div>
             </div>
             <div class="field">
@@ -441,7 +446,13 @@
               <div class="chips" id="failureChips"></div>
               <input type="text" id="failureInput" class="chip-input" placeholder="输入后按回车添加,如:领取失败" />
             </div>
+            <div class="chips-block">
+              <div class="chips-label">加载中词</div>
+              <div class="chips" id="loadingChips"></div>
+              <input type="text" id="loadingInput" class="chip-input" placeholder="输入后按回车添加,如:领取中" />
+            </div>
           </div>
+          <p class="hint">「加载中词」命中时不算失败:点击后服务端要花几十秒发放,界面停在加载动画上属正常,程序会继续等待结果,直到上限才收尾。</p>
         </div>
 
         <div class="panel grow">
@@ -610,11 +621,19 @@
               <input type="number" id="rAppReady" min="0" max="120" step="1" />
             </div>
             <div class="field">
-              <label for="rVerifyReady">结果弹窗渲染上限(s)</label>
+              <label for="rVerifyReady">单次校验截图等待(s)</label>
               <input type="number" id="rVerifyReady" min="0" max="60" step="1" />
             </div>
             <div class="field">
-              <label for="rWatchdog">单场看门狗超时(s)</label>
+              <label for="rVerifyTimeout">等待领取结果上限(s)</label>
+              <input type="number" id="rVerifyTimeout" min="5" max="600" step="5" />
+            </div>
+            <div class="field">
+              <label for="rVerifyPoll">结果复查间隔(s)</label>
+              <input type="number" id="rVerifyPoll" min="1" max="60" step="1" />
+            </div>
+            <div class="field">
+              <label for="rWatchdog">单次尝试超时(s)</label>
               <input type="number" id="rWatchdog" min="30" max="900" />
             </div>
             <div class="field">
@@ -630,7 +649,7 @@
               <label class="check"><input type="checkbox" id="sKeepAwake" /><span>启用(建议同时关闭系统睡眠)</span></label>
             </div>
           </div>
-          <p class="hint">界面渲染等待期内的纯色画面会自动重试,不算锁屏;看门狗超时会中止本场并通知。</p>
+          <p class="hint">点击后服务端要花几十秒发放,程序会在「等待领取结果上限」内反复截图确认(界面停在加载动画上时继续等,不算失败);单次尝试超时会中止本场并通知。</p>
         </div>
 
         <div class="dash-grid">
@@ -643,7 +662,14 @@
               </div>
               <div class="field">
                 <label for="sWebhook">Webhook(可选)</label>
-                <input type="text" id="sWebhook" class="mono" placeholder="Server 酱 / 企业微信机器人 URL" />
+                <input type="text" id="sWebhook" class="mono" placeholder="飞书 / 企业微信 / Server 酱 机器人 URL" />
+              </div>
+              <div class="field">
+                <label>通知连通性</label>
+                <div class="row">
+                  <button class="btn" id="btnTestNotify">发送测试通知</button>
+                  <span class="muted" id="notifyResult"></span>
+                </div>
               </div>
             </div>
           </div>

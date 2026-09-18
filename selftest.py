@@ -51,6 +51,10 @@ def main() -> int:
     check("加载期纯色等待与锁屏判定(不再误判跳过)", lambda: __ready_wait_case())
     check("残留任务状态自愈(断电后的 running 会话)", lambda: __stale_session_case())
     check("执行器:结果弹窗映射(成功收尾 / 失败重试)", lambda: __verify_mapping_case())
+    check("通知:载荷构造与失败识别(飞书 msg_type / 200 伪装成功)", lambda: __notify_payload_case())
+    check("通知:真实 webhook 推送(未配置地址则跳过)", lambda: __notify_webhook_live_case())
+    check("执行器:福利卡片缺失时收敛(不反复重开客户端)", lambda: __no_card_case())
+    check("执行器:点击后加载中持续等待(不再提前判失败)", lambda: __verify_pending_case())
     check("测试识别接口(整屏,无 Key 时报错而不抛异常)", lambda: __test_locate_case())
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
     check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
@@ -268,7 +272,9 @@ def __verify_mapping_case():
     cfg = ConfigStore(tmp / "config.yaml")
     cfg.patch({
         "app": {"dry_run": False},
-        "retry": {"verify_delay_s": 0, "focus_settle_s": 0},
+        # verify_timeout_s 压到最小:等待结果的轮询不该把自检卡在 90 秒上
+        "retry": {"verify_delay_s": 0, "focus_settle_s": 0,
+                  "verify_timeout_s": 0.3, "verify_poll_s": 0.05},
         "vision": {"api_key": "selftest-fake-key"},   # 让流程走到视觉调用(视觉已被打桩)
     })
     store = SessionStore(tmp / "shots")
@@ -304,11 +310,45 @@ def __verify_mapping_case():
         attempt = store.begin_attempt(session, 1)
         return runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)[0]
 
+    def run_await_probe():
+        """验证"结果还没出来"时会反复复查,而不是截一张就下结论。
+
+        旧行为:点击后 sleep 2.5s 截一张,看到"无弹窗"立刻判失败并关客户端重试——
+        而实际发放要几十秒,于是每次都白跑一轮重试。
+        """
+        taken = {"n": 0}
+
+        def counting_grab(win, rect, cfg, dry, label, timeout=None):
+            taken["n"] += 1
+            return fake_shot, None
+
+        original_grab = runner._grab_ready
+        original_verify = runner.vision.verify
+        runner._grab_ready = counting_grab
+        # 始终"没结论":旧逻辑只会截 1 张,新逻辑应在时限内复查多次
+        runner.vision.verify = lambda png: {
+            "popup": None, "success": False, "failed": False, "confidence": 0.3,
+        }
+        try:
+            session = store.begin("manual", {"time": None})
+            attempt = store.begin_attempt(session, 1)
+            runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)
+        finally:
+            runner._grab_ready = original_grab
+            runner.vision.verify = original_verify
+        return {"rounds": taken["n"]}
+
     try:
         success = run({"popup": "success", "keywords": ["领取成功", "开始体验"], "confidence": 0.95})
         failure = run({"popup": "failure", "keywords": ["领取失败", "知道了"], "confidence": 0.95})
         nothing = run({"popup": None, "success": False, "failed": False, "confidence": 0.4})
         claimed = run({"claimed": True, "keywords": ["明日再来"], "confidence": 0.9})
+        # 加载中:服务端还在发放(实测约 40 秒),不能当成失败去关客户端重试
+        pending = run({"pending": True, "popup": "pending", "keywords": ["领取中"], "confidence": 0.9})
+        pending_word = run({"popup": None, "keywords": ["处理中", "请稍候"], "confidence": 0.8})
+        # 点过之后卡片消失了:领取已被消费,按已领收尾而不是失败
+        card_gone = run({"popup": None, "success": False, "failed": False,
+                         "card_visible": False, "confidence": 0.8})
     finally:
         clicker_module.click_norm, clicker_module.click_screen = real_click_norm, real_click_screen
 
@@ -318,6 +358,13 @@ def __verify_mapping_case():
     assert claimed == "success", f"已领应判成功,得到 {claimed}"
     assert failure == "retry", f"失败弹窗应进入重试,得到 {failure}"
     assert nothing == "retry", f"无弹窗应进入重试,得到 {nothing}"
+    assert pending == "retry", f"加载中超时后应进入重试,得到 {pending}"
+    assert card_gone == "success", f"点后卡片消失应判成功,得到 {card_gone}"
+
+    # 点击前截图 → 点后等待结果 → 仍未出结果时,必须多截几张再收敛(旧逻辑只截一张)
+    delays = run_await_probe()
+    assert pending_word == "retry", f"加载词应判 pending,得到 {pending_word}"
+    assert delays["rounds"] >= 2, f"等待结果期间应复查多次,实际只截了 {delays['rounds']} 张"
 
     # 前台校验不通过:跳过点击、计一次未成功(否则点击会落到用户当前窗口上)
     intercepted = len(clicks)
@@ -1030,6 +1077,233 @@ def __shortcut_resolve_case():
     assert target.lower().endswith(".exe"), f"解析结果不是 exe:{target}"
     assert Path(target).is_file(), f"解析出的路径不存在:{target}"
     return f"快捷方式解析正常:{lnks[0].name} → {target}"
+
+
+def __notify_payload_case():
+    """通知载荷构造与响应判定(纯本地,不联网、不发通知)。
+
+    事故背景:webhook 原样发 {"title","text","content","desp"} 给飞书,而飞书要求
+    显式 msg_type,于是每次都回 19002 params error;更隐蔽的是飞书出错也返回
+    HTTP 200,而旧代码只看状态码 → 推送明明失败却一路当成功,用户完全无感。
+    """
+    from core import notify as notify_mod
+
+    # ① 飞书地址必须转成它认识的 post 结构
+    fs = notify_mod._feishu_payload("标题", "正文")
+    assert fs["msg_type"] == "post", f"飞书载荷缺少 msg_type:{fs}"
+    post = fs["content"]["post"]["zh_cn"]
+    assert post["title"] == "标题", f"标题未落到正文结构:{post}"
+    assert post["content"][0][0]["text"] == "正文", f"正文未落到正文结构:{post}"
+    for host in ("https://open.feishu.cn/open-apis/bot/v2/hook/x",
+                 "https://open.larksuite.com/open-apis/bot/v2/hook/x"):
+        assert notify_mod._is_feishu(host), f"未识别为飞书地址:{host}"
+    assert not notify_mod._is_feishu("https://sctapi.ftqq.com/x.send"), "Server酱被误判为飞书"
+
+    # ② 非飞书地址仍走通用载荷(兼容 Server 酱 / 企业微信机器人)
+    generic = notify_mod._generic_payload("标题", "正文")
+    for key in ("title", "text", "content", "desp"):
+        assert key in generic, f"通用载荷缺少 {key}"
+
+    # ③ 关键回归:HTTP 200 但 body 里 code 非 0 必须算失败
+    assert notify_mod._response_error('{"code":19002,"msg":"params error, msg_type need"}'), \
+        "飞书 200 + code!=0 未被识别为失败(这正是静默失败的根因)"
+    assert notify_mod._response_error('{"code":0,"msg":"success"}') is None, "正常响应被误判为失败"
+    assert notify_mod._response_error('{"errcode":93000,"errmsg":"invalid webhook"}'), \
+        "企业微信 errcode!=0 未被识别为失败"
+    assert notify_mod._response_error('{"StatusCode":0,"StatusMessage":"success"}') is None, \
+        "正常响应被误判为失败"
+    assert notify_mod._response_error("not json") is None, "非 JSON 响应不应报错"
+    return "飞书载荷结构正确;HTTP 200 + code!=0 能识别为失败(旧版会静默当成功)"
+
+
+def __notify_webhook_live_case():
+    """真实 webhook 推送(仅在配置了地址时执行;未配置则跳过)。"""
+    from core.config import ConfigStore
+    from core import notify as notify_mod
+
+    cfg = ConfigStore()
+    url = (cfg.get("notify", "webhook_url") or "").strip()
+    if not url:
+        return "未配置 webhook 地址,跳过该项(不影响其他检查)"
+    ok, detail = notify_mod.webhook(url, "ZCode 福利助手 · 自检", "这是一条自检消息,可忽略。")
+    assert ok, f"webhook 推送失败:{detail}"
+    return f"webhook 推送成功({detail})"
+
+
+def __no_card_case():
+    """卡片不在画面上时的收敛:复查后按已领收尾,而不是反复重开客户端。
+
+    事故背景:实测客户端上福利卡片经常整张不出现(当期已领完/活动结束),旧逻辑
+    一路判 retry → 关客户端重启 → 卡片还是不在 → 再重试。某场次因此空转 10 轮、
+    每轮都强杀一次客户端,最后被看门狗腰斩。
+    """
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from core.config import ConfigStore
+    from core.events import EventBus
+    from core.runner import Runner
+    from core.storage import SessionStore
+    from core.vision import VisionClient
+
+    tmp = Path(tempfile.mkdtemp(prefix="zcode-nocard-"))
+    cfg = ConfigStore(tmp / "config.yaml")
+    cfg.patch({
+        "app": {"dry_run": False},
+        "retry": {"verify_delay_s": 0, "no_card_probe_s": 0.01, "no_card_probe_times": 2},
+        "vision": {"api_key": "selftest-fake-key"},
+    })
+    store = SessionStore(tmp / "shots")
+    runner = Runner(cfg, EventBus(), store, VisionClient(cfg))
+    cfg_dict = cfg.all()
+
+    shot = SimpleNamespace(png=b"\x89PNG-fake", width=1240, height=860,
+                           rect=(40, 40, 1240, 860), uniform_ratio=0.3,
+                           full_size=(1920, 1080))
+    runner._open_client = lambda dry, cfg: {"hwnd": 1, "title": "Fake", "rect": [40, 40, 1240, 860]}
+    runner._close_client = lambda dry: None
+    runner._grab_ready = lambda win, rect, cfg, dry, label, timeout=None: (shot, None)
+    runner._position_window = lambda win, cfg, dry: tuple(win["rect"])
+    runner._wait_user_idle = lambda cfg, abort: False
+    runner._ensure_foreground = lambda win, cfg: True
+    import core.clicker as clicker_module
+    clicks = []
+    clicker_module.click_norm = lambda rect, box, humanize=False: clicks.append(box)
+
+    located = {"n": 0}
+
+    def fake_locate(png):
+        located["n"] += 1
+        return {"card_visible": False, "button_found": False, "claimable": False,
+                "confidence": 0.9, "notes": "画面上没有福利卡片"}
+
+    runner.vision.locate = fake_locate
+    session = store.begin("manual", {"time": None})
+    attempt = store.begin_attempt(session, 1)
+    import threading
+    result, reason = runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)
+
+    assert result == "not_available", f"卡片不在时应收敛为无可领,得到 {result}({reason})"
+    assert not clicks, f"卡片不在时不该点击:{clicks}"
+    assert located["n"] >= 2, f"应先复查再下结论,实际只识别了 {located['n']} 次"
+    assert "不再重试" in reason, f"结论未说明不再重试:{reason}"
+
+    # 卡片只是晚渲染:复查时出现 → 应继续正常领取
+    located["n"] = 0
+
+    def late_card(png):
+        located["n"] += 1
+        if located["n"] == 1:
+            return {"card_visible": False, "button_found": False, "claimable": False,
+                    "confidence": 0.9, "notes": "还没看到卡片"}
+        return {"card_visible": True, "button_found": True, "claimable": True,
+                "button_box": [0.089, 0.909, 0.106, 0.93], "button_label": "领取",
+                "confidence": 0.93, "notes": "卡片出现了"}
+
+    runner.vision.locate = late_card
+    runner.vision.verify = lambda png: {"popup": "success", "keywords": ["领取成功"],
+                                        "confidence": 0.95}
+    clicks.clear()
+    session2 = store.begin("manual", {"time": None})
+    attempt2 = store.begin_attempt(session2, 1)
+    result2, _ = runner._one_attempt(session2, attempt2, False, threading.Event(), cfg_dict)
+    assert result2 == "success", f"卡片晚出现时应继续领取,得到 {result2}"
+    assert len(clicks) == 1, f"卡片出现后应点击一次,实际 {len(clicks)} 次"
+    return "卡片不在时复查后收尾(不重开、不点击);晚渲染时能继续领取"
+
+
+def __verify_pending_case():
+    """回归:点击后界面停在加载动画上(实测约 40 秒)时,必须继续等而不是判失败。
+
+    事故背景:旧逻辑点击后只 sleep 2.5s 截一张图,看到"没有结果弹窗"就判未成功 →
+    关客户端重开。而实际发放要几十秒,于是每一轮都在同一处失败,永远领不到。
+    """
+    import tempfile
+    import threading
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from core.config import ConfigStore
+    from core.events import EventBus
+    from core.runner import Runner
+    from core.storage import SessionStore
+    from core.vision import VisionClient
+
+    tmp = Path(tempfile.mkdtemp(prefix="zcode-pending-"))
+    cfg = ConfigStore(tmp / "config.yaml")
+    cfg.patch({
+        "app": {"dry_run": False},
+        "retry": {"verify_delay_s": 0, "verify_timeout_s": 10, "verify_poll_s": 0.05,
+                  "no_card_probe_times": 0, "focus_settle_s": 0},
+        "vision": {"api_key": "selftest-fake-key"},
+    })
+    store = SessionStore(tmp / "shots")
+    runner = Runner(cfg, EventBus(), store, VisionClient(cfg))
+    cfg_dict = cfg.all()
+
+    shot = SimpleNamespace(png=b"\x89PNG-fake", width=1240, height=860,
+                           rect=(40, 40, 1240, 860), uniform_ratio=0.3,
+                           full_size=(1920, 1080))
+    runner._open_client = lambda dry, cfg: {"hwnd": 1, "title": "Fake", "rect": [40, 40, 1240, 860]}
+    runner._close_client = lambda dry: None
+    runner._grab_ready = lambda win, rect, cfg, dry, label, timeout=None: (shot, None)
+    runner._position_window = lambda win, cfg, dry: tuple(win["rect"])
+    runner._user_idle_ok = lambda cfg, abort: False
+    runner._wait_user_idle = lambda cfg, abort: False
+    runner._ensure_foreground = lambda win, cfg: True
+    runner.vision.locate = lambda png: {
+        "button_found": True, "claimable": True, "card_visible": True,
+        "button_box": [0.089, 0.909, 0.106, 0.93], "button_label": "领取",
+        "confidence": 0.93, "scene": "welfare",
+    }
+    import core.clicker as clicker_module
+    real_click = clicker_module.click_norm
+    clicks = []
+    clicker_module.click_norm = lambda rect, box, humanize=False: clicks.append(box)
+
+    try:
+        # 前几次"加载中"、之后才出成功弹窗:必须等到成功,不能半路判失败
+        rounds = {"n": 0}
+        frame_times = []
+
+        def fake_verify(png):
+            rounds["n"] += 1
+            frame_times.append(time.time())
+            if rounds["n"] < 3:
+                return {"pending": True, "popup": "pending", "keywords": ["领取中"],
+                        "confidence": 0.9, "notes": "按钮在转圈"}
+            return {"popup": "success", "keywords": ["领取成功"], "confidence": 0.95}
+
+        runner.vision.verify = fake_verify
+        session = store.begin("manual", {"time": None})
+        attempt = store.begin_attempt(session, 1)
+        result, reason = runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)
+
+        assert result == "success", f"加载中后出结果应判成功,得到 {result}({reason})"
+        assert rounds["n"] >= 3, f"应复查到结果出现,实际只校验 {rounds['n']} 次"
+        assert len(clicks) == 1, f"应只点击一次,实际 {len(clicks)} 次"
+        # 每张校验图都留档,面板可回放结果是怎么出来的
+        saved = list((tmp / "shots" / session["id"]).glob("attempt-1-after*.png"))
+        assert len(saved) >= 3, f"校验截图未逐张留档,只有 {len(saved)} 张"
+
+        # 全程加载中(始终没结论):到时限后收尾为失败,而不是无限等
+        rounds["n"] = 0
+        runner.vision.verify = lambda png: {"pending": True, "popup": "pending",
+                                            "keywords": ["领取中"], "confidence": 0.9}
+        session2 = store.begin("manual", {"time": None})
+        attempt2 = store.begin_attempt(session2, 1)
+        started = time.time()
+        result2, reason2 = runner._one_attempt(session2, attempt2, False, threading.Event(), cfg_dict)
+        elapsed = time.time() - started
+        assert result2 == "retry", f"始终加载中应在时限后收尾为未成功,得到 {result2}"
+        assert elapsed >= 1.0, f"应在时限内持续等待,实际只等了 {elapsed:.1f}s"
+        assert "加载中" in reason2 or "未拿到" in reason2, f"收尾原因未说明仍在加载:{reason2}"
+    finally:
+        clicker_module.click_norm = real_click
+
+    return "加载中持续等待直到出结果(多张截图留档);始终无结论才按时限收尾"
 
 
 if __name__ == "__main__":

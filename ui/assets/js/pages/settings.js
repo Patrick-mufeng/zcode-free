@@ -8,7 +8,8 @@
     'sZcodePath', 'sTitleMatch', 'sFullscreen', 'sStartupWait',
     'sRectX', 'sRectY', 'sRectW', 'sRectH',
     'rAttempts', 'rGap', 'rOpenTimeout', 'rSettle', 'rFocusSettle',
-    'rAppReady', 'rVerifyReady', 'rWatchdog', 'rUserIdle', 'rUserIdleWait',
+    'rAppReady', 'rVerifyReady', 'rVerifyTimeout', 'rVerifyPoll',
+    'rWatchdog', 'rUserIdle', 'rUserIdleWait',
     'sKeepAwake', 'sNotifyDesktop', 'sWebhook', 'sKeepDays',
   ];
 
@@ -38,6 +39,8 @@
         focus_settle_s: Math.max(0, numberOr($('rFocusSettle').value, 0.4)),
         app_ready_timeout_s: Math.max(0, numberOr($('rAppReady').value, 20)),
         verify_ready_timeout_s: Math.max(0, numberOr($('rVerifyReady').value, 8)),
+        verify_timeout_s: Math.max(5, numberOr($('rVerifyTimeout').value, 90)),
+        verify_poll_s: Math.max(1, numberOr($('rVerifyPoll').value, 6)),
         watchdog_s: Math.max(30, numberOr($('rWatchdog').value, 480)),
         user_idle_s: Math.max(0, numberOr($('rUserIdle').value, 1)),
         user_idle_wait_s: Math.max(0, numberOr($('rUserIdleWait').value, 20)),
@@ -80,6 +83,35 @@
       });
 
       $('btnOpenDataDir').addEventListener('click', () => window.API.call('open_data_dir'));
+
+      $('btnTestNotify').addEventListener('click', async () => {
+        const box = $('notifyResult');
+        box.textContent = '发送中…';
+        box.className = 'muted';
+        try {
+          // 连未保存的输入一起带上,省去"改地址→保存→再试"来回
+          const res = await window.API.call('test_notify', {
+            url: $('sWebhook').value.trim(),
+            desktop: $('sNotifyDesktop').checked,
+          });
+          const results = (res && res.results) || {};
+          const parts = [];
+          const problems = [];
+          if (results.desktop === true) parts.push('桌面通知已发出');
+          else if (results.desktop === false) problems.push('桌面通知发送失败');
+          if (results.webhook) {
+            if (results.webhook.ok) parts.push('webhook 推送成功');
+            else problems.push('webhook 失败:' + (results.webhook.message || '未知原因'));
+          } else {
+            parts.push('未填 webhook,已跳过');
+          }
+          box.className = problems.length ? 'err' : 'ok';
+          box.textContent = problems.concat(parts).join(';') || '未启用任何通知渠道';
+        } catch (err) {
+          box.className = 'err';
+          box.textContent = '测试失败:' + err.message;
+        }
+      });
 
       $('btnClearShots').addEventListener('click', async () => {
         if (!(await window.APP.confirm('确定清除全部截图留档吗?该操作不可恢复。'))) return;
@@ -129,6 +161,8 @@
         $('rFocusSettle').value = retry.focus_settle_s != null ? retry.focus_settle_s : 0.4;
         $('rAppReady').value = retry.app_ready_timeout_s != null ? retry.app_ready_timeout_s : 20;
         $('rVerifyReady').value = retry.verify_ready_timeout_s != null ? retry.verify_ready_timeout_s : 8;
+        $('rVerifyTimeout').value = retry.verify_timeout_s != null ? retry.verify_timeout_s : 90;
+        $('rVerifyPoll').value = retry.verify_poll_s != null ? retry.verify_poll_s : 6;
         $('rWatchdog').value = retry.watchdog_s != null ? retry.watchdog_s : 480;
         $('rUserIdle').value = retry.user_idle_s != null ? retry.user_idle_s : 1;
         $('rUserIdleWait').value = retry.user_idle_wait_s != null ? retry.user_idle_wait_s : 20;

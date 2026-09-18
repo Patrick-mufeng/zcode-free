@@ -16,6 +16,7 @@
   const END_LABEL = {
     success: '成功', failed: '失败', need_manual: '需人工',
     aborted: '已中止', dry_run: '演练完成',
+    not_available: '无需领取',
   };
 
   const nodes = {};
@@ -96,7 +97,8 @@
       EV.on('session_end', (event) => {
         if (!event) return;
         if (current) {
-          if (event.status === 'success' || event.status === 'dry_run') visited.add(current);
+          if (event.status === 'success' || event.status === 'dry_run'
+              || event.status === 'not_available') visited.add(current);
           else if (!failed.size) failed.add(current);
         }
         current = null;

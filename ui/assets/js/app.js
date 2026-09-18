@@ -2,6 +2,8 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const STEPS = ['打开客户端', '识别按钮', '点击领取', '校验结果', '收尾'];
+  // 步骤标识沿用旧名(历史记录里也是它),只把展示文案改得更贴合现在的行为
+  const STEP_LABELS = { '校验结果': '等待结果' };
 
   let state = null;
   let stepStatus = {};
@@ -189,10 +191,16 @@
 
   function applyTrackResults(items) {
     if (!trackMarks.length) return;
+    // 只回填今天的记录:时间轴画的是"今天",挂上几天前的旧结果会被读成刚发生的事
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const todayStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const byTime = {};
     (items || []).forEach((item) => {
       const slot = item.slot;
-      if (slot && !byTime[slot]) byTime[slot] = item;
+      if (!slot || byTime[slot]) return;
+      if (!String(item.started_at || '').startsWith(todayStr)) return;
+      byTime[slot] = item;
     });
     trackMarks.forEach((mark) => {
       const rec = byTime[mark.dataset.time];
@@ -231,7 +239,8 @@
       const el = document.createElement('span');
       el.className = 'step';
       el.dataset.step = name;
-      el.innerHTML = '<span class="circle">•</span><span class="label">' + name + '</span>';
+      el.innerHTML = '<span class="circle">•</span><span class="label">' +
+        (STEP_LABELS[name] || name) + '</span>';
       box.appendChild(el);
       if (index < STEPS.length - 1) {
         const arrow = document.createElement('span');
@@ -340,6 +349,11 @@
         alertState = null;
         setFreshResult('success');
         toast('领取成功' + (detail ? ':' + detail : ''), 'ok');
+      } else if (event.status === 'not_available') {
+        // 当期没有可领的福利是正常结果,不是失败:挂个提示但不算告警
+        alertState = { type: 'manual', text: detail };
+        showBanner((event.slot ? '[' + event.slot + '] ' : '') + '本次无需领取:' + detail, false);
+        toast('本次无需领取');
       } else if (event.status === 'need_manual') {
         alertState = { type: 'manual', text: detail };
         showBanner('需要人工处理:' + detail, true);

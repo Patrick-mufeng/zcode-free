@@ -57,8 +57,11 @@
       const today = state.today || {};
       const parts = [`✓${today.success || 0}`, `✗${today.failed || 0}`];
       if (today.need_manual) parts.push(`⚠${today.need_manual}`);
+      if (today.not_available) parts.push(`—${today.not_available}`);
       $('cardToday').textContent = (today.total || 0) ? parts.join('  ') : '-';
-      $('cardTodaySub').textContent = (today.total || 0) ? `共 ${today.total} 场` : '暂无记录';
+      $('cardTodaySub').textContent = (today.total || 0)
+        ? `共 ${today.total} 场${today.not_available ? '(含 ' + today.not_available + ' 场无需领取)' : ''}`
+        : '暂无记录';
 
       $('cardState').textContent = state.running ? '执行中' : (state.master ? '待命' : '已关闭');
       $('cardStateSub').textContent = `总开关:${state.master ? '开启' : '关闭'}${state.dry_run ? ' · 演练模式' : ''}`;

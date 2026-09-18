@@ -84,20 +84,26 @@ DEFAULTS: dict = {
         "max_attempts": 5,
         "retry_gap_s": 5,
         "open_timeout_s": 30,
-        "verify_delay_s": 2.5,   # 结果弹窗是服务端往返,留足渲染时间再截图
+        "verify_delay_s": 2.5,   # 点击后第一次校验前的等待(给结果弹窗留出冒头时间)
         "settle_s": 2.0,
         "focus_settle_s": 0.4,
         "app_ready_timeout_s": 20,     # 等待客户端界面渲染完成(加载期纯色不算锁屏)
-        "verify_ready_timeout_s": 8,   # 点击后等待结果弹窗渲染完成的最长秒数
+        "verify_ready_timeout_s": 8,   # 单次校验截图等待界面就绪的上限
+        "verify_timeout_s": 90,        # 点击后等待结果收敛的总时长:领取常要几十秒才出结果
+        "verify_poll_s": 6,            # 未出结果时的复查间隔
+        "no_card_probe_times": 2,      # 没看到福利卡片时的复查次数(区分"晚渲染"与"当期没有")
+        "no_card_probe_s": 4,          # 卡片复查的间隔秒数
         "ready_poll_s": 1.0,           # 渲染等待的轮询间隔
         "uniform_ratio_max": 0.98,     # 单色占比高于此值视为"还没渲染出来"
         "user_idle_s": 1.0,            # 需连续多少秒无键鼠输入才动手(0=关闭该保护)
         "user_idle_wait_s": 20,        # 用户正在用电脑时,最多等这么久再放弃本场
-        "watchdog_s": 480,       # 需覆盖 5 次完整尝试(每次含 2 次视觉调用)
+        "watchdog_s": 480,       # 单次尝试的超时上限;按次重置,不再提前腰斩长场次
     },
     "success_keywords": ["领取成功", "开始体验", "奖励到账", "已到账", "领取奖励", "获得", "+"],
     "claimed_keywords": ["已领取", "今日已领", "今日已领取", "明天再来", "明日再来", "已参加", "次数已用完"],
     "failure_keywords": ["领取失败", "知道了"],
+    # 领取请求已提交、界面还在加载的文案:命中则继续等结果,不当作失败
+    "loading_keywords": ["领取中", "处理中", "加载中", "请稍候", "请稍等", "提交中", "发放中"],
     "notify": {
         "desktop": True,
         "webhook_url": "",

@@ -34,6 +34,15 @@
     });
   }
 
+  /* 截图留档的标签:点击后可能连续截很多张(等待结果期间反复复查),都归为「校验」 */
+  function imgLabel(kind) {
+    if (kind === 'locate') return '定位截图';
+    if (kind.indexOf('card-probe') === 0) return '卡片复查截图';
+    if (kind === 'after') return '点击后截图(第 1 次)';
+    if (kind.indexOf('after-') === 0) return `点击后截图(第 ${kind.slice(6)} 次复查)`;
+    return '截图';
+  }
+
   async function open(id) {
     activeId = id;
     renderList();
@@ -88,7 +97,7 @@
           if (!res || !res.ok) continue;
           const img = document.createElement('img');
           img.src = res.image;
-          img.title = `${kind === 'locate' ? '定位截图' : '点击后截图'} — 点击看大图`;
+          img.title = imgLabel(kind) + ' — 点击看大图';
           img.addEventListener('click', async () => {
             const full = await window.API.call('get_shot', { session: session.id, name });
             if (full && full.ok) window.APP.lightbox(full.image);
