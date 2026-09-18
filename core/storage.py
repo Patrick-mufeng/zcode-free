@@ -135,9 +135,12 @@ class SessionStore:
 
     def shot_path(self, session_id: str, name: str) -> Path | None:
         """安全解析截图路径,防止目录穿越。"""
+        root = self.dir.resolve()
         base = (self.dir / session_id).resolve()
         path = (base / name).resolve()
-        if not str(path).startswith(str(self.dir.resolve())):
+        # 必须整体落在留档根目录内。前缀字符串比较(startswith)会被
+        # data/shots-evil 这类同前缀兄弟目录绕过,这里用真正的包含判断
+        if not path.is_relative_to(root) or not base.is_relative_to(root):
             return None
         return path if path.is_file() else None
 

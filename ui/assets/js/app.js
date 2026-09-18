@@ -13,7 +13,10 @@
 
   // 本地执行态:exec_start 立刻切「执行中」,session_end 立刻切结果,
   // 不必等后端下一次 get_state 回来(那一趟可能慢半秒,状态会显得滞后)。
+  // execRunningAt 记录置位时刻:后端刚 spawn 的一瞬 running 可能还没翻 true,
+  // refreshState 回同步时要给它留出余量,不能立刻清掉。
   let execRunning = false;
+  let execRunningAt = 0;
   let freshResult = null;        // { type: 'success' , timer }
   let freshTimer = null;
 
@@ -51,20 +54,27 @@
     $('lightboxImg').removeAttribute('src');
   }
 
+  // 当前打开的确认框的结算函数。Esc 关闭必须走它把 Promise 结算成 false:
+  // 只藏遮罩会让 Promise 永远挂起、监听器残留,下一次点「确定」会把
+  // 之前被放弃的操作(如清空截图)一起执行出去。
+  let activeConfirmDone = null;
+
   function confirmDialog(text) {
     return new Promise((resolve) => {
       $('confirmText').textContent = text;
       $('confirmMask').classList.remove('hidden');
-      const ok = () => done(true);
-      const cancel = () => done(false);
       function done(value) {
+        activeConfirmDone = null;
         $('confirmMask').classList.add('hidden');
-        $('confirmOk').removeEventListener('click', ok);
-        $('confirmCancel').removeEventListener('click', cancel);
+        $('confirmOk').removeEventListener('click', onOk);
+        $('confirmCancel').removeEventListener('click', onCancel);
         resolve(value);
       }
-      $('confirmOk').addEventListener('click', ok);
-      $('confirmCancel').addEventListener('click', cancel);
+      const onOk = () => done(true);
+      const onCancel = () => done(false);
+      activeConfirmDone = done;
+      $('confirmOk').addEventListener('click', onOk);
+      $('confirmCancel').addEventListener('click', onCancel);
     });
   }
 
@@ -147,6 +157,22 @@
     // 清掉旧的刻度与标记,只留基准线
     axis.querySelectorAll('.dt-tick, .dt-tick-lbl, .dt-mark, .dt-cursor').forEach((n) => n.remove());
 
+    // 场次标记:位置由时间换算,结果由最近记录回填。
+    // 场次可只排在部分星期:轨道标题是「今天的场次」,非今天触发的场次不该画上来
+    const pyDay = (new Date().getDay() + 6) % 7;   // JS 周日=0 → Python 周一=0
+    const slots = ((state && state.slots) || []).filter((slot) =>
+      !slot.days || !slot.days.length || (slot.days || []).indexOf(pyDay) >= 0);
+    // 落在整六点(00/06/12/18/24)刻度上的场次:同位置只显示标记自己的时间,刻度标签让位
+    const onTickMinutes = new Set(
+      slots.map((slot) => {
+        const parts = String(slot.time || '').split(':');
+        if (parts.length !== 2) return -1;
+        const minutes = Number(parts[0]) * 60 + Number(parts[1]);
+        return Number.isFinite(minutes) && minutes % 360 === 0 ? minutes : -1;
+      }),
+    );
+    onTickMinutes.delete(-1);
+
     // 刻度:每 2 小时一根,每 6 小时一根主刻度并标时间
     for (let h = 0; h <= 24; h += 2) {
       const major = h % 6 === 0;
@@ -155,7 +181,7 @@
       tick.className = 'dt-tick' + (major ? ' major' : '');
       tick.style.left = left + '%';
       axis.appendChild(tick);
-      if (major) {
+      if (major && !onTickMinutes.has(h * 60)) {
         const lbl = document.createElement('span');
         lbl.className = 'dt-tick-lbl' + (h === 0 ? ' edge-start' : (h === 24 ? ' edge-end' : ''));
         lbl.style.left = left + '%';
@@ -164,8 +190,6 @@
       }
     }
 
-    // 场次标记:位置由时间换算,结果由最近记录回填
-    const slots = (state && state.slots) || [];
     trackMarks = [];
     slots.forEach((slot) => {
       const time = String(slot.time || '');
@@ -274,10 +298,25 @@
     } catch (err) {
       return;
     }
+    // 以后端为准回同步本地执行态:SSE 断线会丢 session_end,不同步的话
+    // 「执行中」标签和被禁用的按钮会一直卡到刷新页面。刚 spawn 的瞬间
+    // running 可能还没翻 true,给 5 秒余量,避免把刚点下的执行态清掉。
+    if (state.running) {
+      execRunning = true;
+      if (!execRunningAt) execRunningAt = Date.now();
+    } else if (execRunning && Date.now() - execRunningAt > 5000) {
+      execRunning = false;
+      execRunningAt = 0;
+    }
     renderTopbar();
     renderSteps();
-    // 场次数量或启用状态变化时重建轨道;否则只回填结果
-    const signature = ((state.slots || []).map((s) => s.time + (s.enabled === false ? '0' : '1')).join(',')) +
+    // 场次数量/启用状态/星期变化,或跨天(今天该画的场次不同)时重建轨道;
+    // 否则只回填结果
+    const today = new Date();
+    const signature = ((state.slots || []).map((s) =>
+      s.time + (s.enabled === false ? '0' : '1') +
+      ((s.days && s.days.length) ? s.days.join('') : 'a')).join(',')) +
+      '@' + (today.getDay() + 6) % 7 +
       '|' + ((state.recent || []).map((r) => r.id || r.slot).join(','));
     if (signature !== buildTrack.signature) {
       buildTrack.signature = signature;
@@ -301,10 +340,12 @@
       // 本周已领到的跳过场次不碰客户端,不做"执行中"那套提示,免得看起来像在跑
       if (event && event.skipped) {
         execRunning = false;
+        execRunningAt = 0;
         refreshState();
         return;
       }
       execRunning = true;
+      execRunningAt = Date.now();
       stepStatus = {};
       lastAttempt = 0;
       $('livePanel').classList.remove('hidden');
@@ -355,6 +396,7 @@
     EV.on('session_end', (event) => {
       if (!event) return;
       execRunning = false;
+      execRunningAt = 0;
       $('banner').classList.add('hidden');   // 先收起执行提示,失败时再弹告警
       const detail = event.summary || '';
       if (event.status === 'success') {
@@ -416,7 +458,7 @@
       try {
         const res = await window.API.call('run_once');
         toast((res && res.message) || '', res && res.ok ? 'ok' : 'err');
-        if (res && res.ok) { execRunning = true; renderTopbar(); switchTab('logs'); }
+        if (res && res.ok) { execRunning = true; execRunningAt = Date.now(); renderTopbar(); switchTab('logs'); }
       } catch (err) {
         toast('启动失败:' + err.message, 'err');
       }
@@ -428,7 +470,8 @@
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         closeLightbox();
-        $('confirmMask').classList.add('hidden');
+        if (activeConfirmDone) activeConfirmDone(false);
+        else $('confirmMask').classList.add('hidden');
       }
     });
 

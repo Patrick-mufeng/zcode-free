@@ -1,16 +1,20 @@
-/* 场次表页:增删改 + 未来 7 天预览(即时保存) */
+/* 场次表页:分组行(启用/时间/重复/覆盖/结果) + 场次日历(即时保存) */
 (function () {
   const $ = (id) => document.getElementById(id);
   window.PAGES = window.PAGES || {};
   let slots = [];
   let lastResults = {};
+  // 日历状态:当前查看的年月(默认今天),以及「日期 → 当天结果等级」映射
+  let calYear = null;
+  let calMonth = null;          // 0 起:0=一月
+  let dayMarks = {};            // 'YYYY-MM-DD' → 3=已领 2=未成功 1=无需领
 
   // 星期编号沿用 Python 的 weekday():周一=0 … 周日=6,顺序与后端一致
   const DAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
   const DAY_ORDER = [4, 5, 6, 0, 1, 2, 3];   // 展示顺序从周五起(与福利周期一致)
 
   function collect() {
-    const rows = $('slotTable').querySelectorAll('tbody tr');
+    const rows = $('slotTable').querySelectorAll('.slot-row');
     const out = [];
     rows.forEach((row) => {
       const time = row.querySelector('input[type="time"]').value || '10:00';
@@ -44,10 +48,95 @@
     }
   }
 
+  /* ---------- 一行场次的 DOM ---------- */
+
+  function buildRow(slot, index) {
+    const picked = (slot.days && slot.days.length && slot.days.length < 7) ? slot.days : null;
+    // 未指定星期 = 每天:按钮全灰(靠 .all 的样式传达),并加「每天」说明
+    const daysHtml = DAY_ORDER.map((d) => {
+      const on = !!picked && picked.indexOf(d) >= 0;
+      return `<button type="button" class="day${on ? ' on' : ''}${picked ? '' : ' all'}"
+                data-day="${d}" title="周${DAY_NAMES[d]}">${DAY_NAMES[d]}</button>`;
+    }).join('');
+
+    // 记录里只存了时间(session.slot 没有星期),所以按时间匹配今天的执行结果;
+    // 同一时间排了多个星期时,它们共享同一条今日记录(同分钟内只会跑成一个)
+    const result = lastResults[slot.time];
+    const info = result ? window.UITL.statusInfo(result.status) : null;
+    // 只显示「今天」的记录:否则改完场次后,这一列还挂着上次触发的旧结果,
+    // 看起来像是刚失败/被跳过(实际是几天前那场的)
+    const resultHtml = info
+      ? `<span class="st ${info.cls}">${window.UITL.esc(info.text)}</span>` +
+        `<span class="st-t"> · ${window.UITL.esc(window.UITL.dt(result.started_at))}</span>`
+      : '<span class="st muted">今日未执行</span>';
+
+    const row = document.createElement('div');
+    row.className = 'slot-row' + (slot.enabled === false ? ' off' : '');
+    row.innerHTML = `
+      <label class="sw" title="启用 / 停用这一场">
+        <input type="checkbox" ${slot.enabled !== false ? 'checked' : ''} /><i></i>
+      </label>
+      <input type="time" class="slot-time" value="${window.UITL.esc(slot.time || '10:00')}" />
+      <div class="days" title="点击切换星期;全灰=每天">
+        <div class="day-set">${daysHtml}</div>
+        <span class="every${picked ? ' hidden' : ''}">每天</span>
+      </div>
+      <div class="mini-group" title="留空表示用设置页里的默认值">
+        <label class="mini"><input type="number" class="attempts" min="1" max="20" placeholder="默认"
+          value="${slot.attempts != null ? window.UITL.esc(slot.attempts) : ''}" /><span>次</span></label>
+        <label class="mini"><input type="number" class="gap" min="1" max="120" placeholder="默认"
+          value="${slot.retry_gap_s != null ? window.UITL.esc(slot.retry_gap_s) : ''}" /><span>秒</span></label>
+      </div>
+      <div class="slot-result">${resultHtml}</div>
+      <button class="slot-del" title="删除场次" aria-label="删除场次">删除</button>`;
+
+    row.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+      row.classList.toggle('off', !row.querySelector('input[type="checkbox"]').checked);
+      save(true);
+    });
+    row.querySelector('input[type="time"]').addEventListener('change', () => save(true));
+    row.querySelector('.attempts').addEventListener('change', () => save(true));
+    row.querySelector('.gap').addEventListener('change', () => save(true));
+
+    // 星期按钮:没有任何 .on 表示「每天」;点了某个星期就变成"只跑这些星期"。
+    // 从「每天」点第一下时,意图必然是"只排这一天",所以直接切成单天;
+    // 已是自定义状态时按普通开关切换,全部取消则回到「每天」。
+    const dayBtns = row.querySelectorAll('.days .day');
+    const applyDays = () => {
+      const on = [...dayBtns].filter((b) => b.classList.contains('on'));
+      dayBtns.forEach((b) => {
+        b.classList.toggle('all', on.length === 0);
+        b.classList.toggle('on', on.length > 0 && b.classList.contains('on'));
+      });
+      row.querySelector('.every').classList.toggle('hidden', on.length > 0);
+    };
+    dayBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const custom = [...dayBtns].some((b) => b.classList.contains('on'));
+        if (!custom) {
+          btn.classList.add('on');            // 每天 → 只留这一天
+        } else {
+          btn.classList.toggle('on');
+        }
+        applyDays();
+        save(true);
+        buildCalendar();
+      });
+    });
+
+    row.querySelector('.slot-del').addEventListener('click', () => {
+      slots.splice(index, 1);
+      render();
+      save(true);
+    });
+    return row;
+  }
+
   function render() {
-    const tbody = $('slotTable').querySelector('tbody');
-    tbody.innerHTML = '';
+    const list = $('slotTable');
+    list.querySelectorAll('.slot-row').forEach((n) => n.remove());
     $('slotEmpty').classList.toggle('hidden', slots.length > 0);
+    list.classList.toggle('empty-list', slots.length === 0);
     const countEl = $('slotCount');
     if (countEl) {
       const on = slots.filter((s) => s.enabled !== false).length;
@@ -55,101 +144,85 @@
     }
 
     slots.forEach((slot, index) => {
-      // 结果按「时间 + 星期」匹配:同一时间的场次可能排在不同星期
-      const result = lastResults[slotKey(slot)];
-      const info = result ? window.UITL.statusInfo(result.status) : null;
-      // 只显示「今天」的记录:否则改完场次后,这一列还挂着上次触发的旧结果,
-      // 看起来像是刚失败/被跳过(实际是几天前那场的)
-      const detail = info
-        ? window.UITL.esc(info.text) + ' · ' + window.UITL.esc(window.UITL.dt(result.started_at))
-        : '<span class="muted">今日未执行</span>';
-      const picked = (slot.days && slot.days.length && slot.days.length < 7) ? slot.days : null;
-      // 未指定星期 = 每天:按钮全灰(靠 .all 的样式传达"每天"),并加 title 说明
-      const daysHtml = DAY_ORDER.map((d) => {
-        const on = !!picked && picked.indexOf(d) >= 0;
-        return `<button type="button" class="day${on ? ' on' : ''}${picked ? '' : ' all'}"
-                  data-day="${d}" title="周${DAY_NAMES[d]}">${DAY_NAMES[d]}</button>`;
-      }).join('');
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="checkbox" ${slot.enabled !== false ? 'checked' : ''} /></td>
-        <td><input type="time" value="${window.UITL.esc(slot.time || '10:00')}" /></td>
-        <td class="days" title="点击切换星期;全灰=每天">${daysHtml}</td>
-        <td><input type="number" class="attempts" min="1" max="20" placeholder="默认" value="${slot.attempts != null ? slot.attempts : ''}" /></td>
-        <td><input type="number" class="gap" min="1" max="120" placeholder="默认" value="${slot.retry_gap_s != null ? slot.retry_gap_s : ''}" /></td>
-        <td class="${info ? info.cls : 'muted'}">${detail}</td>
-        <td><button class="btn small danger" title="删除场次" aria-label="删除场次">删除</button></td>`;
-
-      tr.querySelector('input[type="checkbox"]').addEventListener('change', () => save(true));
-      tr.querySelector('input[type="time"]').addEventListener('change', () => save(true));
-      tr.querySelector('.attempts').addEventListener('change', () => save(true));
-      tr.querySelector('.gap').addEventListener('change', () => save(true));
-
-      // 星期按钮:没有任何 .on 表示「每天」;点了某个星期就变成"只跑这些星期"。
-      // 从「每天」点第一下时,意图必然是"只排这一天",所以直接切成单天;
-      // 已是自定义状态时按普通开关切换,全部取消则回到「每天」。
-      const dayBtns = tr.querySelectorAll('.days .day');
-      const applyDays = () => {
-        const on = [...dayBtns].filter((b) => b.classList.contains('on'));
-        dayBtns.forEach((b) => {
-          b.classList.toggle('all', on.length === 0);
-          b.classList.toggle('on', on.length > 0 && b.classList.contains('on'));
-        });
-      };
-      dayBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const custom = [...dayBtns].some((b) => b.classList.contains('on'));
-          if (!custom) {
-            btn.classList.add('on');            // 每天 → 只留这一天
-          } else {
-            btn.classList.toggle('on');
-          }
-          applyDays();
-          save(true);
-          renderWeek(collect());
-        });
-      });
-
-      tr.querySelector('button.danger').addEventListener('click', () => {
-        slots.splice(index, 1);
-        render();
-        save(true);
-      });
-      tbody.appendChild(tr);
+      list.appendChild(buildRow(slot, index));
     });
-    renderWeek(slots);
+    buildCalendar();
   }
 
-  /* 场次唯一键:时间 + 星期。老配置没有 days,按「每天」处理 */
-  function slotKey(slot) {
-    const days = (slot.days && slot.days.length && slot.days.length < 7)
-      ? slot.days.slice().sort((a, b) => a - b).join('') : 'all';
-    return `${slot.time}|${days}`;
-  }
+  /* ---------- 场次日历:整月网格,过去标结果、未来标计划 ---------- */
 
-  function renderWeek(list) {
-    const box = $('weekPreview');
-    box.innerHTML = '';
-    const enabled = (list || slots).filter((s) => s.enabled !== false && s.time);
-    const names = ['日', '一', '二', '三', '四', '五', '六'];
-    for (let i = 0; i < 7; i += 1) {
-      const day = new Date();
-      day.setDate(day.getDate() + i);
-      // JS 的 getDay() 是周日=0,换算成 Python 的周一=0
-      const pyDay = (day.getDay() + 6) % 7;
-      const todays = enabled
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const dateKey = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+
+  /* 把会话记录折成「每天一个结论」,取当天最重的那条:
+     成功 > 失败/中止/需人工 > 跳过/无可领/演练 */
+  function rankOf(status) {
+    if (status === 'success') return 3;
+    if (status === 'failed' || status === 'need_manual' || status === 'aborted') return 2;
+    if (status === 'not_available' || status === 'skipped' || status === 'dry_run') return 1;
+    return 0;
+  }
+  const MARK_HTML = {
+    3: '<span class="cal-tag ok">已领</span>',
+    2: '<span class="cal-tag fail">未成功</span>',
+    1: '<span class="cal-tag muted">无需领</span>',
+  };
+
+  function buildCalendar() {
+    if (calYear === null) {
+      const now = new Date();
+      calYear = now.getFullYear();
+      calMonth = now.getMonth();
+    }
+    const now = new Date();
+    const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const enabled = slots.filter((s) => s.enabled !== false && s.time);
+    const firstPyDay = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;   // 周一=0
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const rows = Math.ceil((firstPyDay + daysInMonth) / 7);
+
+    $('calTitle').textContent = `${calYear} 年 ${calMonth + 1} 月`;
+    const viewingNow = calYear === now.getFullYear() && calMonth === now.getMonth();
+    $('calToday').classList.toggle('hidden', viewingNow);
+
+    const grid = $('calGrid');
+    grid.innerHTML = '';
+    const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+    for (let i = 0; i < rows * 7; i += 1) {
+      const dayNum = i - firstPyDay + 1;
+      const cell = document.createElement('div');
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        // 上/下月的补位格:显示相邻月的真实日期,内容留空
+        const adj = dayNum < 1 ? prevMonthDays + dayNum : dayNum - daysInMonth;
+        cell.className = 'cal-cell dim';
+        cell.innerHTML = `<span class="cal-num">${adj}</span>`;
+        grid.appendChild(cell);
+        continue;
+      }
+      const key = dateKey(calYear, calMonth, dayNum);
+      const pyDay = i % 7;                        // 表头从周一开始,列号即 Python 星期
+      const planned = enabled
         .filter((s) => !s.days || !s.days.length || s.days.indexOf(pyDay) >= 0)
         .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-      const label = `${day.getMonth() + 1}/${day.getDate()} 周${names[day.getDay()]}${i === 0 ? '(今天)' : ''}`;
-      const row = document.createElement('div');
-      row.className = 'week-row';
-      row.innerHTML = `<span class="week-day">${label}</span><span>${
-        todays.length
-          ? todays.map((s) => `<span class="week-slot">${window.UITL.esc(s.time)}</span>`).join('')
-          : '<span class="muted">无场次</span>'
-      }</span>`;
-      box.appendChild(row);
+      const parts = [];
+      if (planned.length) {
+        parts.push('<div class="cal-slots">' + planned
+          .map((s) => `<span class="week-slot">${window.UITL.esc(s.time)}</span>`).join('') + '</div>');
+      }
+      if (dayMarks[key]) parts.push(`<div class="cal-marks">${MARK_HTML[dayMarks[key]]}</div>`);
+      cell.className = 'cal-cell' + (key === todayKey ? ' today' : '');
+      cell.innerHTML = `<span class="cal-num">${dayNum}</span>${parts.join('')}`;
+      grid.appendChild(cell);
     }
+  }
+
+  function shiftMonth(delta) {
+    if (calYear === null) buildCalendar();
+    const d = new Date(calYear, calMonth + delta, 1);
+    calYear = d.getFullYear();
+    calMonth = d.getMonth();
+    buildCalendar();
   }
 
   window.PAGES.schedule = {
@@ -159,6 +232,14 @@
         render();
         save(true);
       });
+      $('calPrev').addEventListener('click', () => shiftMonth(-1));
+      $('calNext').addEventListener('click', () => shiftMonth(1));
+      $('calToday').addEventListener('click', () => {
+        const now = new Date();
+        calYear = now.getFullYear();
+        calMonth = now.getMonth();
+        buildCalendar();
+      });
     },
 
     async onShow() {
@@ -167,16 +248,22 @@
       try {
         const data = await window.API.call('list_sessions', { limit: 200 });
         lastResults = {};
+        dayMarks = {};
         const today = new Date();
         const pad = (n) => String(n).padStart(2, '0');
         const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
         (data && data.items ? data.items : []).forEach((item) => {
-          // 只看今天的记录:历史场次的旧结果挂在这里会被误读成"刚刚又失败了"
+          const started = String(item.started_at || '');
+          // 「最近结果」只看今天的记录:历史场次的旧结果挂在这里会被误读成"刚刚又失败了"
           if (!item.slot || lastResults[item.slot]) return;
-          if (!String(item.started_at || '').startsWith(todayStr)) return;
-          lastResults[item.slot] = item;
+          if (started.startsWith(todayStr)) lastResults[item.slot] = item;
+          // 日历则要整月的结果:按日期折成当天最重的一个结论
+          if (started.length >= 10) {
+            const key = started.slice(0, 10);
+            dayMarks[key] = Math.max(dayMarks[key] || 0, rankOf(item.status));
+          }
         });
-      } catch (err) { lastResults = {}; }
+      } catch (err) { lastResults = {}; dayMarks = {}; }
       render();
     },
   };

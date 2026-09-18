@@ -5,10 +5,10 @@
   let loading = false;
 
   const FIELDS = [
-    'sZcodePath', 'sTitleMatch', 'sFullscreen', 'sStartupWait',
+    'sZcodePath', 'sTitleMatch', 'sFullscreen', 'sStartupWait', 'sRestore',
     'sRectX', 'sRectY', 'sRectW', 'sRectH',
     'rAttempts', 'rGap', 'rOpenTimeout', 'rSettle', 'rFocusSettle',
-    'rAppReady', 'rVerifyReady', 'rVerifyTimeout', 'rVerifyPoll',
+    'rAppReady', 'rVerifyReady', 'rVerifyWait',
     'rWatchdog', 'rUserIdle', 'rUserIdleWait',
     'sKeepAwake', 'sNotifyDesktop', 'sWebhook', 'sKeepDays', 'sWeeklyOnce',
   ];
@@ -40,8 +40,7 @@
         focus_settle_s: Math.max(0, numberOr($('rFocusSettle').value, 0.4)),
         app_ready_timeout_s: Math.max(0, numberOr($('rAppReady').value, 20)),
         verify_ready_timeout_s: Math.max(0, numberOr($('rVerifyReady').value, 8)),
-        verify_timeout_s: Math.max(5, numberOr($('rVerifyTimeout').value, 90)),
-        verify_poll_s: Math.max(1, numberOr($('rVerifyPoll').value, 6)),
+        verify_wait_s: Math.max(5, numberOr($('rVerifyWait').value, 30)),
         watchdog_s: Math.max(30, numberOr($('rWatchdog').value, 480)),
         user_idle_s: Math.max(0, numberOr($('rUserIdle').value, 1)),
         user_idle_wait_s: Math.max(0, numberOr($('rUserIdleWait').value, 20)),
@@ -194,8 +193,7 @@
         $('rFocusSettle').value = retry.focus_settle_s != null ? retry.focus_settle_s : 0.4;
         $('rAppReady').value = retry.app_ready_timeout_s != null ? retry.app_ready_timeout_s : 20;
         $('rVerifyReady').value = retry.verify_ready_timeout_s != null ? retry.verify_ready_timeout_s : 8;
-        $('rVerifyTimeout').value = retry.verify_timeout_s != null ? retry.verify_timeout_s : 90;
-        $('rVerifyPoll').value = retry.verify_poll_s != null ? retry.verify_poll_s : 6;
+        $('rVerifyWait').value = retry.verify_wait_s != null ? retry.verify_wait_s : 30;
         $('rWatchdog').value = retry.watchdog_s != null ? retry.watchdog_s : 480;
         $('rUserIdle').value = retry.user_idle_s != null ? retry.user_idle_s : 1;
         $('rUserIdleWait').value = retry.user_idle_wait_s != null ? retry.user_idle_wait_s : 20;

@@ -395,8 +395,6 @@ main {
 .panel > .hint { margin-top: auto; }
 
 /* 场次表:行少时靠"行高略宽 + 说明贴底"消化剩余空间,而不是留一块空 */
-#slotTable td { padding-top: 11px; padding-bottom: 11px; }
-#slotTable tbody tr:last-child td { padding-bottom: 11px; }
 /* 左栏底部的"添加"引导:无场次或场次少时都有内容可读 */
 .slot-foot {
   display: flex;
@@ -409,9 +407,6 @@ main {
   color: var(--t3);
 }
 .slot-foot .spacer { flex: 1; }
-
-/* 周预览不拉伸:卡片被拉高而内容堆在顶部只会更像空白 */
-.week .week-row { justify-content: flex-start; }
 
 /* 概览底行:最近记录 + 最近日志并排,内容量与页面高度相匹配 */
 .bottom-grid {
@@ -681,59 +676,9 @@ main {
 .table th:first-child, .table td:first-child { padding-left: 2px; }
 .table th:last-child, .table td:last-child { padding-right: 2px; }
 
-/* 表格里的行内控件(场次表的 time / number / 勾选) */
-.table input[type="time"],
-.table input[type="number"] {
-  width: 100%;
-  min-width: 0;
-  max-width: 132px;
-  height: 26px;
-  padding: 0 7px;
-  background: var(--bg);
-  border: 1px solid var(--hair-2);
-  border-radius: 4px;
-  font: 12px var(--mono);
-  font-variant-numeric: tabular-nums;
-  transition: border-color .16s var(--ease);
-}
-.table input[type="time"] { max-width: 104px; }
-.table input:focus { border-color: var(--amber); outline: none; }
-.table input::placeholder { color: var(--t3); }
+/* 表格里的行内控件(只读表格的勾选;场次表已改为独立行组件,见 §12) */
 
-/* 场次表里的星期选择:一排小方块。全灰(.all)表示「每天」——
-   这是一个三态控件(每天 / 部分星期 / 无),所以用 .on 表示"仅这些星期" */
-.days {
-  display: flex;
-  gap: 3px;
-  align-items: center;
-}
-.days .day {
-  width: 27px;
-  height: 24px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-  border: 1px solid var(--hair-2);
-  border-radius: 4px;
-  color: var(--t3);
-  font: 11px var(--mono);
-  cursor: pointer;
-  transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease);
-}
-.days .day:hover { border-color: var(--amber); color: var(--t2); }
-.days .day.on {
-  background: var(--amber-dim);
-  border-color: var(--amber);
-  color: #EFC177;
-}
-/* 「每天」态:按钮看起来是"未选中",但整体不显得像坏掉的控件 */
-.days .day.all { border-style: solid; border-color: var(--hair); color: var(--t3); }
-.days .day.all:hover { border-color: var(--amber); }
-
-/* 统一的自绘勾选框(表格 / 表单共用外观) */
-.table input[type="checkbox"],
+/* 统一的自绘勾选框(表单共用外观) */
 .check input {
   appearance: none;
   width: 16px;
@@ -746,9 +691,7 @@ main {
   position: relative;
   transition: background .16s, border-color .16s;
 }
-.table input[type="checkbox"]:checked,
 .check input:checked { background: var(--ok); border-color: var(--ok); }
-.table input[type="checkbox"]:checked::after,
 .check input:checked::after {
   content: "";
   position: absolute;
@@ -915,22 +858,251 @@ main {
 .coord-op { display: grid; place-items: center; font: 14px var(--mono); color: var(--t3); }
 
 /* ============================== 12. 场次表页 ============================== */
-.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
-.week-row {
+/* 行不是表格,是一组对齐的"仪器格":启用 / 时间 / 重复 / 尝试·间隔 / 结果 / 删除。
+   表头与数据行共用同一套列模板,列对齐由 grid 保证,列宽改这里一处即可。 */
+.slot-list { min-width: 0; }
+.slot-head-row,
+.slot-row {
+  display: grid;
+  grid-template-columns: 40px 100px minmax(240px, 1.3fr) 186px minmax(160px, 1fr) 48px;
+  gap: 14px;
+  align-items: center;
+}
+.slot-head-row {
+  padding: 0 10px 8px 2px;
+  border-bottom: 1px solid var(--hair-2);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t3);
+}
+.slot-list.empty-list .slot-head-row { display: none; }
+.slot-row {
+  padding: 10px 10px 10px 2px;
+  border-bottom: 1px solid var(--hair);
+  transition: background .14s var(--ease);
+}
+.slot-row:last-child { border-bottom: 0; }
+.slot-row:hover { background: var(--s2); }
+
+/* 停用的场次:整行内容退到背景里,但仍可交互(改回来不用先重新建) */
+.slot-row.off .slot-time,
+.slot-row.off .day-set,
+.slot-row.off .mini-group { opacity: .38; }
+.slot-row.off .sw { opacity: .55; }
+
+/* 启用开关:单色,不用绿色勾选抢视觉 —— 状态靠滑块位置表达 */
+.sw {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  cursor: pointer;
+}
+.sw input {
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.sw i {
+  pointer-events: none;
+  width: 26px;
+  height: 15px;
+  border-radius: var(--r-pill);
+  background: var(--s3);
+  border: 1px solid var(--hair-2);
+  position: relative;
+  transition: background .16s var(--ease), border-color .16s var(--ease);
+}
+.sw i::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 1.5px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--t3);
+  transition: transform .16s var(--ease), background .16s var(--ease);
+}
+.sw input:checked + i { background: var(--hair-2); border-color: var(--hair-2); }
+.sw input:checked + i::after { transform: translateX(11px); background: var(--t1); }
+.sw input:focus-visible + i { outline: 1px solid var(--amber); outline-offset: 1px; }
+
+/* 时间:一行里最重要的数据,唯一放大加粗的字段 */
+.slot-time {
+  height: 30px;
+  width: 96px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-ctl);
+  font: 600 13.5px var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+  transition: border-color .16s var(--ease);
+}
+.slot-time:focus { border-color: var(--amber); outline: none; }
+
+/* 重复:七个连体格子拼成一段;「每天」态在组尾跟一枚说明字 */
+.days { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.day-set { display: flex; }
+.days .day {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--hair-2);
+  border-radius: 0;
+  margin-left: -1px;
+  color: var(--t3);
+  font: 11.5px var(--mono);
+  cursor: pointer;
+  transition: background .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease);
+}
+.days .day:first-child { border-radius: var(--r-ctl) 0 0 var(--r-ctl); margin-left: 0; }
+.days .day:last-child { border-radius: 0 var(--r-ctl) var(--r-ctl) 0; }
+.days .day:hover { border-color: var(--amber); color: var(--t2); position: relative; z-index: 1; }
+.days .day.on {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  color: #EFC177;
+  position: relative;
+  z-index: 2;
+}
+.days .day.all { border-color: var(--hair); color: var(--t3); }
+.days .day.all:hover { border-color: var(--amber); }
+.days .every {
+  font-size: 11px;
+  color: var(--t3);
+  white-space: nowrap;
+}
+.days .every.hidden { display: none; }
+
+/* 尝试 / 间隔:小字段 + 单位后缀,覆盖默认值才填,空着就是「默认」 */
+.mini-group { display: flex; gap: 8px; align-items: center; }
+.mini {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--hair-2);
+  border-radius: var(--r-ctl);
+  height: 26px;
+  overflow: hidden;
+  transition: border-color .16s var(--ease);
+}
+.mini:focus-within { border-color: var(--amber); }
+.mini input {
+  appearance: textfield;
+  width: 46px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0 0 0 7px;
+  font: 12px var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+}
+.mini input::-webkit-outer-spin-button,
+.mini input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.mini input::placeholder { color: var(--t3); }
+.mini span {
+  padding: 0 7px 0 4px;
+  font-size: 11px;
+  color: var(--t3);
+  border-left: 1px solid var(--hair);
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 最近结果:状态词带语义色,时间弱化 */
+.slot-result { font-size: 12px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot-result .st { font-weight: 500; }
+.slot-result .st.ok { color: var(--ok); }
+.slot-result .st.fail { color: var(--err); }
+.slot-result .st.muted { color: var(--t3); font-weight: 400; }
+.slot-result .st-t { color: var(--t3); font-size: 11.5px; }
+
+/* 删除:平时只是一行灰字,悬停行时才浮出来,按下意图才泛红 */
+.slot-del {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 4px 6px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  color: transparent;
+  cursor: pointer;
+  transition: color .14s var(--ease), background .14s var(--ease);
+}
+.slot-row:hover .slot-del { color: var(--t3); }
+.slot-del:hover { color: var(--err); background: var(--err-dim); }
+.slot-del:focus-visible { color: var(--t3); outline: 1px solid var(--hair-2); }
+
+/* 窄屏:列模板放不下时整体横向滚动,不换行错位 */
+.slot-scroll { overflow-x: auto; }
+.slot-scroll .slot-list { min-width: 700px; }
+
+/* ---------- 场次日历:整月网格,过去标结果、未来标计划 ---------- */
+.cal-title { font-size: 12.5px; color: var(--t2); min-width: 96px; text-align: center; }
+.cal-nav { min-width: 30px; padding: 0 8px; font: 14px var(--mono); line-height: 1; }
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cal-weekdays span { text-align: center; font-size: 11px; color: var(--t3); }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.cal-cell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 62px;
+  padding: 6px 8px;
   background: var(--s2);
   border: 1px solid var(--hair);
   border-radius: var(--r-ctl);
-  padding: 9px 10px;
   min-width: 0;
 }
-.week-day { font: 500 11px var(--mono); color: var(--t2); white-space: nowrap; }
+.cal-cell.dim { background: transparent; border-color: transparent; }
+.cal-cell.dim .cal-num { color: var(--t3); opacity: .45; }
+.cal-cell.today { border-color: var(--amber-line); background: var(--s3); }
+.cal-num {
+  font: 600 12.5px var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t2);
+  line-height: 1.2;
+}
+.cal-cell.today .cal-num { color: #EFC177; }
+.cal-slots { display: flex; flex-wrap: wrap; gap: 4px; }
+.cal-marks { display: flex; flex-wrap: wrap; gap: 4px; }
+.cal-tag {
+  display: inline-block;
+  padding: 0 7px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.cal-tag.ok { background: var(--ok-dim); color: var(--ok); }
+.cal-tag.fail { background: var(--err-dim); color: var(--err); }
+.cal-tag.muted { background: var(--s3); color: var(--t3); }
 .week-slot {
   display: inline-block;
-  margin: 0 4px 3px 0;
-  padding: 1px 7px;
+  padding: 0 7px;
+  height: 18px;
+  line-height: 18px;
   border-radius: var(--r-pill);
   background: var(--amber-dim);
   color: #EFC177;
@@ -1077,18 +1249,6 @@ input[type="range"]::-webkit-slider-thumb {
 /* 测试识别:没跑测试时的占位,避免空出一整块面板 */
 
 /* 未来 7 天:按行排列,每行一天 */
-.week-rows { display: flex; flex-direction: column; gap: 5px; flex: 1 1 0; min-height: 0; }
-.week-rows .week-row {
-  flex: 1 1 0;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  min-height: 32px;
-}
-.week-rows .week-day { flex: 0 0 116px; }
-.week-rows .week-slot { margin: 0 4px 0 0; }
-
 /* 测试识别空状态:左边说明 + 右边三步,把这块区域的信息量做够 */
 .panel.grow > .locate-placeholder { flex: 1 1 0; min-height: 0; }
 .locate-placeholder {

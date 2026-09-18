@@ -171,23 +171,47 @@ class Api:
         return {"ok": True, "settings": self.get_settings()}
 
     def get_vision_config(self, payload=None) -> dict:
-        return {
-            "vision": self.cfg.get("vision") or {},
-            "verify_delay_s": self.cfg.get("retry", "verify_delay_s", default=2.5),
+        """识别配置。api_key 不回传明文(改用尾号提示),见 _masked_vision()。"""
+        data = {
+            "vision": self._masked_vision(),
+            "verify_wait_s": self.cfg.get("retry", "verify_wait_s", default=30),
             "success_keywords": self.cfg.get("success_keywords") or [],
             "claimed_keywords": self.cfg.get("claimed_keywords") or [],
             "failure_keywords": self.cfg.get("failure_keywords") or [],
             "loading_keywords": self.cfg.get("loading_keywords") or [],
         }
+        return data
+
+    def _masked_vision(self) -> dict:
+        """vision 配置去掉明文 Key,只留尾号提示。
+
+        面板与后端虽同机,但明文不该进前端:页面可能被投屏/共享/截图,本地
+        HTTP 桥也曾被任意来源访问过(现已加 Host/Origin 校验,掩码作纵深防御)。
+        前端拿 api_key_hint 显示「已保存(尾号 xxxx)」,输入框留空提交即保持不变。
+        """
+        vision = dict(self.cfg.get("vision") or {})
+        saved = (vision.get("api_key") or "").strip()
+        vision["api_key"] = ""
+        vision["api_key_hint"] = saved[-4:] if saved else ""
+        return vision
 
     def save_vision_config(self, payload=None) -> dict:
         payload = payload or {}
         patch: dict = {}
         vision = payload.get("vision")
         if isinstance(vision, dict):
-            patch["vision"] = vision
-        if "verify_delay_s" in payload:
-            patch.setdefault("retry", {})["verify_delay_s"] = payload["verify_delay_s"]
+            incoming = dict(vision)
+            incoming.pop("api_key_hint", None)     # 展示用字段,不落盘
+            key = incoming.get("api_key")
+            if key is None:
+                incoming["api_key"] = ""           # 显式清除(面板「清除 Key」按钮)
+            elif not str(key).strip():
+                incoming.pop("api_key", None)      # 留空 = 不修改,保留已存 Key
+            else:
+                incoming["api_key"] = str(key).strip()
+            patch["vision"] = incoming
+        if "verify_wait_s" in payload:
+            patch.setdefault("retry", {})["verify_wait_s"] = payload["verify_wait_s"]
         if "max_attempts" in payload:
             patch.setdefault("retry", {})["max_attempts"] = payload["max_attempts"]
         for key in ("success_keywords", "claimed_keywords", "failure_keywords", "loading_keywords"):
@@ -196,7 +220,7 @@ class Api:
                 patch[key] = [str(k).strip() for k in value if str(k).strip()]
         if patch:
             self.cfg.patch(patch)
-        return {"ok": True, "vision": self.cfg.get("vision")}
+        return {"ok": True, "vision": self._masked_vision()}
 
     def get_prompts(self, payload=None) -> dict:
         return {"locate": LOCATE_PROMPT, "verify": VERIFY_PROMPT}

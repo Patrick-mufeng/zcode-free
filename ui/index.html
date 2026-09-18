@@ -316,21 +316,21 @@
               <span class="spacer"></span>
               <button class="btn small" id="addSlot" type="button">添加场次</button>
             </div>
-            <table class="table" id="slotTable">
-              <thead><tr>
-                <th style="width:64px">启用</th>
-                <th style="width:118px">时间</th>
-                <th style="width:232px">重复</th>
-                <th style="width:130px">尝试次数</th>
-                <th style="width:138px">重试间隔(s)</th>
-                <th>最近结果</th>
-                <th style="width:70px"></th>
-              </tr></thead>
-              <tbody></tbody>
-            </table>
+            <div class="slot-scroll">
+              <div class="slot-list" id="slotTable">
+                <div class="slot-head-row">
+                  <span>启用</span>
+                  <span>时间</span>
+                  <span>重复</span>
+                  <span>尝试 / 间隔</span>
+                  <span>最近结果</span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
             <div class="empty hidden" id="slotEmpty">还没有场次,点右上角「添加场次」创建第一场</div>
             <div class="slot-foot">
-              <span>修改后立即保存并生效,调度器热重载,无需重启。「重复」列不点亮任何星期表示每天。</span>
+              <span>修改后立即保存并生效,调度器热重载,无需重启。「重复」不点亮任何星期表示每天。</span>
               <span class="spacer"></span>
               <span class="mono" id="slotCount">0 个场次</span>
             </div>
@@ -338,11 +338,19 @@
 
           <div class="panel wide">
             <div class="section-head">
-              <span class="sec-idx">未来 7 天预览</span>
-              <span class="sec-note">按启用中的场次与各自勾选的星期推算</span>
+              <span class="sec-idx">场次日历</span>
+              <span class="sec-note">过去的日子标当天结果,未来的日子按场次勾选的星期标计划</span>
+              <span class="spacer"></span>
+              <button class="btn small cal-nav" id="calPrev" type="button" title="上一月">‹</button>
+              <span class="mono cal-title" id="calTitle">—</span>
+              <button class="btn small cal-nav" id="calNext" type="button" title="下一月">›</button>
+              <button class="btn small hidden" id="calToday" type="button">回到今天</button>
             </div>
-            <div id="weekPreview" class="week week-rows"></div>
-            <p class="hint">列表里列出的时间就是届时会被触发的场次;未启用的场次、以及星期不匹配的日子都不会出现在这里。</p>
+            <div class="cal-weekdays">
+              <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+            </div>
+            <div id="calGrid" class="cal-grid"></div>
+            <p class="hint">胶囊是计划场次;绿色「已领」= 当天领取成功,红色「未成功」= 当天有场次没跑成,灰色「无需领」= 跳过或当期无可领。点 ‹ › 翻月。</p>
           </div>
         </div>
       </section>
@@ -389,6 +397,7 @@
               <div class="row">
                 <input type="password" id="vApiKey" placeholder="platform.deepseek.com 创建" />
                 <button class="btn small" id="vToggleKey" type="button">显示</button>
+                <button class="btn small" id="vClearKey" type="button" title="删除已保存的 Key">清除</button>
               </div>
             </div>
             <div class="field">
@@ -418,9 +427,9 @@
               <input type="number" id="vTimeout" min="5" max="120" step="1" />
             </div>
             <div class="field">
-              <label for="vVerifyDelay">首次校验前等待(s)</label>
+              <label for="vVerifyDelay">点击后等待加载(s)</label>
               <div class="row">
-                <input type="number" id="vVerifyDelay" min="0.3" max="15" step="0.1" />
+                <input type="number" id="vVerifyDelay" min="5" max="120" step="5" />
                 <span class="muted">出结果前会反复复查,上限见设置页</span>
               </div>
             </div>
@@ -631,12 +640,8 @@
               <input type="number" id="rVerifyReady" min="0" max="60" step="1" />
             </div>
             <div class="field">
-              <label for="rVerifyTimeout">等待领取结果上限(s)</label>
-              <input type="number" id="rVerifyTimeout" min="5" max="600" step="5" />
-            </div>
-            <div class="field">
-              <label for="rVerifyPoll">结果复查间隔(s)</label>
-              <input type="number" id="rVerifyPoll" min="1" max="60" step="1" />
+              <label for="rVerifyWait">点击后等待加载(s)</label>
+              <input type="number" id="rVerifyWait" min="5" max="300" step="5" />
             </div>
             <div class="field">
               <label for="rWatchdog">单次尝试超时(s)</label>

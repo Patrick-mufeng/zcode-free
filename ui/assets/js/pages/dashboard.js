@@ -66,6 +66,7 @@
       $('cardWeekly').className = 'value ' + (claimed ? 'ok' : '');
       if (!weekly.enabled) {
         $('cardWeeklySub').textContent = '每周限制已关闭';
+        $('cardWeekly').removeAttribute('title');
       } else if (claimed) {
         const src = weekly.claimed_source === 'manual' ? '手动'
           : (weekly.claimed_slot || '定时');
@@ -76,9 +77,14 @@
         $('cardWeekly').title = `${weekly.label || ''} 尚未领取,${state.slots_enabled || 0} 个场次待执行`;
       }
 
-      if (window.MOTION) window.MOTION.countTo($('cardSlots'), state.slots_total || 0);
-      else $('cardSlots').textContent = String(state.slots_total || 0);
-      $('cardSlotsSub').textContent = `启用 ${state.slots_enabled || 0} 个`;
+      // 「今日场次」只数今天真的会触发的启用场次:场次可只排在部分星期,
+      // 未指定星期(每天)或 days 含今天才算
+      const pyDay = (new Date().getDay() + 6) % 7;   // JS 周日=0 → Python 周一=0
+      const todays = (state.slots || []).filter((s) => s.enabled !== false &&
+        (!s.days || !s.days.length || (s.days || []).indexOf(pyDay) >= 0));
+      if (window.MOTION) window.MOTION.countTo($('cardSlots'), todays.length);
+      else $('cardSlots').textContent = String(todays.length);
+      $('cardSlotsSub').textContent = `全部配置 ${state.slots_total || 0} 个`;
 
       const today = state.today || {};
       const parts = [`✓${today.success || 0}`, `✗${today.failed || 0}`];

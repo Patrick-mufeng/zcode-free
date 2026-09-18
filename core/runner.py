@@ -163,11 +163,6 @@ class Runner:
                         self.weekly.mark_claimed(
                             slot=slot.get("time") or "", source=trigger, when=None)
                     break
-                if result == "not_available":
-                    # 当期没有可领的福利:重开客户端也变不出来,直接收尾(不刷失败、不反复重启)
-                    status, summary = "not_available", reason
-                    keep_client = True
-                    break
                 if result == "manual":
                     status, summary = "need_manual", reason
                     break
@@ -317,37 +312,37 @@ class Runner:
         verdict = validate.judge_locate(locate, cfg)
         note = locate.get("notes") or locate.get("error") or ""
 
-        # 卡片不在画面上:可能是当期已领完/活动结束(再重开也变不出来),也可能只是比主界面
-        # 晚渲染。复查一次再收敛——否则会白跑一串重试,还每轮都强杀一次客户端。
+        # 卡片不在画面上:按用户设定的策略,先原地等 no_card_wait_s 秒再复查一次——
+        # 卡片可能比主界面晚渲染。复查时出现了就直接接着点;仍不在则按普通「重试」
+        # 走关闭-重开循环,由尝试次数兜底,不再单独判"当期无可领"。
         if verdict == validate.NO_CARD and not dry:
-            max_no_card_probe = max(int(cfg["retry"].get("no_card_probe_times") or 0), 0)
-            for extra in range(1, max_no_card_probe + 1):
-                if abort.wait(float(cfg["retry"].get("no_card_probe_s") or 4)):
-                    return "aborted", "看门狗超时,已强制中止"
-                probe_shot, probe_bad = self._grab_ready(
-                    win, rect, cfg, dry, f"复查福利卡片({extra})",
-                    timeout=float(cfg["retry"].get("verify_ready_timeout_s") or 8),
-                )
-                if probe_bad == "locked":
-                    return "manual", "电脑处于锁屏状态,本场跳过(解锁后请等下一场)"
-                probe = self.vision.locate(probe_shot.png)
-                probe_verdict = validate.judge_locate(probe, cfg)
-                self.store.save_shot(
-                    session, probe_shot.png, f"attempt-{attempt['n']}-card-probe-{extra}.png"
-                )
-                if probe_verdict == validate.CLAIM:
-                    # 卡片只是晚出来了:改用这张的结果继续走点击流程。
-                    # shot 也要一起换掉 —— 点击要用"量出按钮坐标的那张图"的尺寸与窗口矩形,
-                    # 否则期间的窗口位移会让归一化坐标换算到错误位置。
-                    locate, verdict, shot = probe, validate.CLAIM, probe_shot
-                    note = probe.get("notes") or ""
-                    logger.info(f"福利卡片在复查第 {extra} 次时出现,继续领取")
-                    break
-                if probe.get("card_visible") is not False:
-                    # 模型这次没明确回答卡片不在 → 证据不足,不做"当期无福利"的结论
-                    verdict = validate.RETRY
-                    note = probe.get("notes") or ""
-                    break
+            raw_no_card_wait = cfg["retry"].get("no_card_wait_s")
+            no_card_wait = max(float(5 if raw_no_card_wait is None else raw_no_card_wait), 0.0)
+            if abort.wait(no_card_wait):
+                return "aborted", "看门狗超时,已强制中止"
+            probe_shot, probe_bad = self._grab_ready(
+                win, rect, cfg, dry, "复查福利卡片",
+                timeout=float(cfg["retry"].get("verify_ready_timeout_s") or 8),
+            )
+            if probe_bad == "locked":
+                return "manual", "电脑处于锁屏状态,本场跳过(解锁后请等下一场)"
+            probe = self.vision.locate(probe_shot.png)
+            probe_verdict = validate.judge_locate(probe, cfg)
+            # 记入 attempt.images,面板的截图回放才能看到复查过程
+            attempt["images"]["card-probe"] = self.store.save_shot(
+                session, probe_shot.png, f"attempt-{attempt['n']}-card-probe.png"
+            )
+            self.store.save(session)
+            if probe_verdict == validate.CLAIM:
+                # 卡片只是晚出来了:改用这张的结果继续走点击流程。
+                # shot 也要一起换掉 —— 点击要用"量出按钮坐标的那张图"的尺寸与窗口矩形,
+                # 否则期间的窗口位移会让归一化坐标换算到错误位置。
+                locate, verdict, shot = probe, validate.CLAIM, probe_shot
+                note = probe.get("notes") or ""
+                logger.info("福利卡片在复查时出现,继续领取")
+            elif probe_verdict in (validate.ALREADY, validate.MANUAL):
+                verdict = probe_verdict
+                note = probe.get("notes") or probe.get("error") or ""
 
         self._step(session, attempt, "识别按钮",
                    "ok" if verdict in (validate.CLAIM, validate.ALREADY) else "fail",
@@ -355,13 +350,13 @@ class Runner:
 
         if verdict == validate.MANUAL:
             return "manual", f"识别到需人工处理的界面:{note or '未知'}"
-        if verdict == validate.NO_CARD:
-            return "not_available", (
-                "复查后仍未见福利卡片:当前没有可领的福利(本期已领完 / 活动未开放 / 卡片被关闭),"
-                "不再重试以免反复重启客户端"
-            )
         if verdict == validate.ALREADY:
             return "claimed", "页面显示已领取,无需重复领取"
+        if verdict == validate.NO_CARD:
+            return "retry", (
+                f"等待 {cfg['retry'].get('no_card_wait_s')}s 复查后仍未见福利卡片,"
+                "关闭客户端重开再找"
+            )
         if verdict != validate.CLAIM:
             return "retry", f"未找到可点击的领取按钮:{note or '未知'}"
 
@@ -388,11 +383,9 @@ class Runner:
 
         # 4) 校验
         #
-        # 点击后结果不是立刻出现的:服务端要走一段发放流程(实测约 40 秒),这期间界面
-        # 停在加载动画上,既没有结果弹窗、也认不出任何结果词。若点击后立刻截一张图就
-        # 下结论,必然把"还在处理"误判成"没有结果"→ 关客户端重试,而重试又会在同一处
-        # 再失败一次。因此这里改为:在 verify_timeout_s 内反复截图判定,直到出现明确
-        # 的成功/失败/已领结论;只有始终没有结论才算未成功。
+        # 点击后的判定策略(按用户设定):等待加载动画 verify_wait_s 秒(默认 30s),
+        # 然后截图判定一次——成功/已领取则收尾;失败、仍在加载、或没有任何结论,
+        # 一律按未成功进入"关客户端 → 等间隔 → 重开"的重试循环,由尝试次数兜底。
         self._set_step(STEPS[3])
         verify, v2, after = self._await_verify(win, rect, cfg, dry, session, attempt, abort)
 
@@ -416,77 +409,43 @@ class Runner:
             return "retry", f"弹窗提示领取失败({',命中:' + '/'.join(map(str, hit)) if hit else ''})"
         if v2 == validate.PENDING:
             return "retry", (
-                f"等待 {cfg['retry'].get('verify_timeout_s')}s 后界面仍在加载中,"
-                "未拿到领取结果(可能是网络较慢)"
+                f"点击后等待 {cfg['retry'].get('verify_wait_s')}s,界面仍在加载中未拿到结果,"
+                "按未成功重试(若实际已领到,重开后页面会显示已领取)"
             )
-        return "retry", f"点击后未检测到结果弹窗:{note2 or '未知'}"
+        return "retry", f"点击后未检测到成功弹窗:{note2 or '未知'}"
 
     def _await_verify(self, win: dict, rect, cfg: dict, dry: bool, session: dict,
                       attempt: dict, abort: threading.Event
                       ) -> tuple[dict, str, "capture.Capture | None"]:
-        """点击后在时限内反复截图校验,直到拿到明确结论。
+        """点击后等待 verify_wait_s 秒,再截图判定一次。
 
-        返回 (最后一次校验结果, 判定, 最后一次截图);看门狗中止时截图可能为 None。
-        期间每次截图都留档,面板里能回放"结果是怎么一步步出来的"。
+        返回 (校验结果, 判定, 校验截图);看门狗中止时截图可能为 None。
+        演练模式不点击,等不来结果弹窗,不空等、直接截一张判定即收。
         """
         retry_cfg = cfg["retry"]
-        delay = max(float(retry_cfg.get("verify_delay_s") or 0), 0.0)
-        total = max(float(retry_cfg.get("verify_timeout_s") or 0), delay)
-        poll = max(float(retry_cfg.get("verify_poll_s") or 1.0), 0.5)
+        raw_wait = retry_cfg.get("verify_wait_s")
+        wait = max(float(30 if raw_wait is None else raw_wait), 0.0)
         ready_timeout = float(retry_cfg.get("verify_ready_timeout_s") or 8)
-        deadline = time.time() + total
-        started = time.time()
 
-        time.sleep(delay)                    # 先给弹窗一点冒头时间,避免第一张必空
-        verify: dict = {}
-        verdict = validate.RETRY
-        shot = None
-        round_no = 0
-
-        while True:
-            round_no += 1
-            shot, _ = self._grab_ready(win, rect, cfg, dry, "校验截图", timeout=ready_timeout)
-            name = f"attempt-{attempt['n']}-after.png" if round_no == 1 \
-                else f"attempt-{attempt['n']}-after-{round_no}.png"
-            attempt["images"]["after" if round_no == 1 else f"after-{round_no}"] = \
-                self.store.save_shot(session, shot.png, name)
-
-            verify = self.vision.verify(shot.png)
-            attempt["verify"] = verify
-            self.store.save(session)
-            verdict = validate.judge_verify(verify, cfg, clicked=not dry)
-
-            # 演练不点击,等不来结果弹窗,一轮即收,免得空耗时限
-            if dry:
-                return verify, verdict, shot
-            if verdict in (validate.SUCCESS, validate.ALREADY, validate.FAILED):
-                if round_no > 1:
-                    logger.info(
-                        f"第 {round_no} 次校验拿到结论({verdict},已等待 {time.time() - started:.0f}s)"
-                    )
-                return verify, verdict, shot
-
-            if abort.is_set():
-                logger.warning("等待领取结果期间看门狗超时,中止本场")
-                return verify, "aborted", shot
-            if time.time() >= deadline:
-                logger.warning(
-                    f"点击后等待 {total:.0f}s 仍未出现结果({verdict}),按未成功收尾"
-                )
-                return verify, verdict, shot
-
-            waited = time.time() - started
-            left = max(deadline - time.time(), 0.0)
-            logger.info(
-                f"结果还没出来(已等 {waited:.0f}s,判定 {verdict}),{min(poll, left):.0f}s 后复查…"
-            )
+        if not dry and wait > 0:
+            logger.info(f"已点击,等待加载动画 {wait:.0f}s 后判定结果…")
             self._publish_attempt(
                 attempt["n"], "running", session["id"],
-                f"已点击,等待领取结果({waited:.0f}s)", attempt,
+                f"已点击,等待加载动画({wait:.0f}s)", attempt,
             )
-            if abort.wait(poll):
+            if abort.wait(wait):
                 logger.warning("等待领取结果期间看门狗超时,中止本场")
-                return verify, "aborted", shot
+                return {}, "aborted", None
+
+        shot, _ = self._grab_ready(win, rect, cfg, dry, "校验截图", timeout=ready_timeout)
+        attempt["images"]["after"] = self.store.save_shot(
+            session, shot.png, f"attempt-{attempt['n']}-after.png"
+        )
+        verify = self.vision.verify(shot.png)
+        attempt["verify"] = verify
+        self.store.save(session)
+        verdict = validate.judge_verify(verify, cfg, clicked=not dry)
+        return verify, verdict, shot
 
     # ---------- 输入与前台保护 ----------
 
@@ -683,9 +642,6 @@ class Runner:
         label = slot.get("time") or "手动"
         if status == "success":
             notify(self.cfg, f"ZCode 福利[{label}] 领取成功", summary)
-        elif status == "not_available":
-            # 当期没有可领的福利不是故障,不必发通知打扰
-            logger.info(f"ZCode 福利[{label}] 未领取:{summary}")
         elif status == "failed":
             notify(self.cfg, f"ZCode 福利[{label}] 领取失败", f"{summary},请手动查看")
         elif status == "need_manual":

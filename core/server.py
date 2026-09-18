@@ -14,11 +14,40 @@ import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from loguru import logger
 
 from core.config import UI_DIR
 from core.events import EventBus
+
+# 面板只服务本机:Host/来源校验只认这几个主机名(端口不限,浏览器可能经
+# localhost 或 127.0.0.1 访问,端口被占用时服务也会向后换端口)。
+LOCAL_HOST_NAMES = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_of_authority(authority: str) -> str:
+    """从 Host 头的 authority(host:port)里取出主机名,兼容 IPv6 括号写法。"""
+    authority = (authority or "").strip().lower()
+    if authority.startswith("["):
+        end = authority.find("]")
+        return authority[1:end] if end > 0 else authority
+    if authority.count(":") == 1:            # host:port
+        return authority.split(":", 1)[0]
+    return authority                          # 裸主机名或裸 IPv6
+
+
+def _is_local_authority(authority: str) -> bool:
+    return _host_of_authority(authority) in LOCAL_HOST_NAMES
+
+
+def _is_local_url(url: str) -> bool:
+    """Origin/Referer 是完整 URL,主机名交给 urlsplit 解析(自动去端口/括号)。"""
+    try:
+        host = urlsplit(url).hostname or ""
+    except Exception:
+        return False
+    return host in LOCAL_HOST_NAMES
 
 
 class Bridge:
@@ -45,6 +74,30 @@ def make_handler(bridge: Bridge):
         def log_message(self, fmt, *args):  # 静默访问日志
             pass
 
+        def _reject_foreign(self) -> bool:
+            """校验请求来自本机面板;不通过则回 403 并返回 True。
+
+            面板的 RPC 能退出程序、清空留档、改写配置,「识别」页还会回传模型
+            连接参数,因此必须确认请求真的来自本机面板:
+            - Host 头必须指向本机 —— 否则恶意网页可借 DNS rebinding 把
+              evil.com 解析到 127.0.0.1,变成同源后连 API Key 明文都能读走;
+            - Origin / Referer 一旦出现也必须指向本机 —— 跨站 POST 只需
+              Content-Type: text/plain 就能绕过预检直发(实测可静默触发
+              quit_app / cleanup),这是唯一的拦截点。
+            curl / 自检等非浏览器客户端不带 Origin,Host 指向本机即放行。
+            """
+            if not _is_local_authority(self.headers.get("Host") or ""):
+                logger.warning(f"已拒绝非本机 Host 的请求:{self.headers.get('Host')!r}")
+                self._json({"error": "forbidden: 面板只允许从本机地址(127.0.0.1 / localhost)访问"}, 403)
+                return True
+            for value in ((self.headers.get("Origin") or "").strip(),
+                          (self.headers.get("Referer") or "").strip()):
+                if value and not _is_local_url(value):
+                    logger.warning(f"已拒绝跨站请求:来源 {value!r}")
+                    self._json({"error": "forbidden: 跨站请求已被拒绝"}, 403)
+                    return True
+            return False
+
         # ---------- 工具 ----------
 
         def _send(self, code: int, body: bytes, content_type: str):
@@ -65,6 +118,8 @@ def make_handler(bridge: Bridge):
         # ---------- GET ----------
 
         def do_GET(self):
+            if self._reject_foreign():
+                return
             path = self.path.split("?")[0]
             if path == "/events":
                 return self._sse()
@@ -111,6 +166,8 @@ def make_handler(bridge: Bridge):
         # ---------- POST ----------
 
         def do_POST(self):
+            if self._reject_foreign():
+                return
             if self.path.split("?")[0] != "/api":
                 return self._json({"error": "not found"}, 404)
             try:

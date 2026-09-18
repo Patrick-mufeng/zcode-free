@@ -73,6 +73,12 @@
       });
 
       EV.on('exec_start', (event) => {
+        if (event && event.skipped) {
+          // 本周已领到的跳过场次没有流程可画:直接落结果标签,不亮「执行中」
+          resetPath(false);
+          setPhase(END_LABEL.skipped);
+          return;
+        }
         resetPath(true);
         setPhase((event && event.dry_run ? '演练中' : '执行中') + ' · 打开客户端');
       });

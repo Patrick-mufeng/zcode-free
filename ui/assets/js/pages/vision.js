@@ -15,6 +15,18 @@
   let loadingKeywords = [];
   let loading = false;
 
+  /* Key 字段不再回填明文:输入框保持空白,占位符展示「已保存(尾号 xxxx)」;
+     用户重新输入则整体替换,留空提交表示不修改(后端约定) */
+  function setKeyField(hint) {
+    const input = $('vApiKey');
+    input.value = '';
+    input.placeholder = hint
+      ? '已保存(尾号 ' + hint + '),留空表示不修改'
+      : 'platform.deepseek.com 创建';
+    input.type = 'password';
+    $('vToggleKey').textContent = '显示';
+  }
+
   function collectVision() {
     return {
       provider: $('vProvider').value,
@@ -96,6 +108,18 @@
         $('vToggleKey').textContent = show ? '隐藏' : '显示';
       });
 
+      // 清除已保存的 Key:输入框留空表示「不修改」,所以删除要走这个显式入口
+      $('vClearKey').addEventListener('click', async () => {
+        if (!(await window.APP.confirm('确定清除已保存的 API Key 吗?\n清除后到点领取会因缺少 Key 停在识别一步。'))) return;
+        try {
+          await window.API.call('save_vision_config', { vision: { api_key: null } });
+          setKeyField('');
+          window.APP.toast('已清除 API Key', 'ok');
+        } catch (err) {
+          window.APP.toast('清除失败:' + err.message, 'err');
+        }
+      });
+
       $('vTemperature').addEventListener('input', () => {
         $('vTemperatureVal').textContent = Number($('vTemperature').value).toFixed(1);
       });
@@ -109,7 +133,7 @@
         $(id).addEventListener('change', () => saveVision());
       });
       $('vVerifyDelay').addEventListener('change', () =>
-        saveVision({ verify_delay_s: Number($('vVerifyDelay').value) || 2.5 }));
+        saveVision({ verify_wait_s: Number($('vVerifyDelay').value) || 30 }));
 
       $('vProvider').addEventListener('change', () => {
         const preset = PRESETS[$('vProvider').value];
@@ -177,7 +201,7 @@
         const v = data.vision || {};
         $('vProvider').value = v.provider || 'deepseek';
         $('vBaseUrl').value = v.base_url || '';
-        $('vApiKey').value = v.api_key || '';
+        setKeyField(v.api_key_hint || '');
         $('vModel').value = v.model || '';
         $('vTemperature').value = v.temperature != null ? v.temperature : 0.2;
         $('vTemperatureVal').textContent = Number($('vTemperature').value).toFixed(1);
@@ -185,7 +209,7 @@
         $('vMinConf').value = v.locate_confidence_min != null ? v.locate_confidence_min : 0.7;
         $('vMinConfVal').textContent = Number($('vMinConf').value).toFixed(2);
         $('vTimeout').value = v.timeout_s || 20;
-        $('vVerifyDelay').value = data.verify_delay_s != null ? data.verify_delay_s : 2.5;
+        $('vVerifyDelay').value = data.verify_wait_s != null ? data.verify_wait_s : 30;
         $('vHumanize').checked = !!v.humanize_mouse;
         successKeywords = data.success_keywords || [];
         claimedKeywords = data.claimed_keywords || [];

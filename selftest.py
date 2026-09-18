@@ -53,14 +53,16 @@ def main() -> int:
     check("执行器:结果弹窗映射(成功收尾 / 失败重试)", lambda: __verify_mapping_case())
     check("通知:载荷构造与失败识别(飞书 msg_type / 200 伪装成功)", lambda: __notify_payload_case())
     check("通知:真实 webhook 推送(未配置地址则跳过)", lambda: __notify_webhook_live_case())
-    check("执行器:福利卡片缺失时收敛(不反复重开客户端)", lambda: __no_card_case())
-    check("执行器:点击后加载中持续等待(不再提前判失败)", lambda: __verify_pending_case())
+    check("执行器:福利卡片缺失复查(晚出现继续领,仍缺失走重试)", lambda: __no_card_case())
+    check("执行器:点击后固定等待判定(仍在加载即重试)", lambda: __verify_pending_case())
     check("每周一次机会(周期从周五起 / 已领则跳过后续场次)", lambda: __weekly_case())
     check("场次按星期(每天 / 指定星期 / 误配置告警)", lambda: __weekday_slot_case())
     check("测试识别接口(整屏,无 Key 时报错而不抛异常)", lambda: __test_locate_case())
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
     check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
     check("HTTP 桥往返(get_state / 首页 / 静态资源)", lambda: __http_case())
+    check("本地服务来源校验(跨站 Origin / 伪造 Host 一律 403)", lambda: __origin_guard_case())
+    check("API Key 不回传明文(留空保持 / 显式清除 / 尾号提示)", lambda: __api_key_mask_case())
     check("打包:冻结路径分流(资源 / 数据分离)", lambda: __frozen_path_case())
     check("打包:单实例锁(第二个实例必须被拒)", lambda: __single_instance_case())
     check("打包:防休眠(开关 / 执行期嵌套计数)", lambda: __awake_case())
@@ -274,9 +276,8 @@ def __verify_mapping_case():
     cfg = ConfigStore(tmp / "config.yaml")
     cfg.patch({
         "app": {"dry_run": False},
-        # verify_timeout_s 压到最小:等待结果的轮询不该把自检卡在 90 秒上
-        "retry": {"verify_delay_s": 0, "focus_settle_s": 0,
-                  "verify_timeout_s": 0.3, "verify_poll_s": 0.05},
+        # verify_wait_s 压到 0:点击后的固定等待不该把自检卡在 30 秒上
+        "retry": {"verify_wait_s": 0, "focus_settle_s": 0},
         "vision": {"api_key": "selftest-fake-key"},   # 让流程走到视觉调用(视觉已被打桩)
     })
     store = SessionStore(tmp / "shots")
@@ -312,11 +313,10 @@ def __verify_mapping_case():
         attempt = store.begin_attempt(session, 1)
         return runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)[0]
 
-    def run_await_probe():
-        """验证"结果还没出来"时会反复复查,而不是截一张就下结论。
+    def run_single_check():
+        """验证点击后只做一次固定等待 + 一次截图判定(按用户设定的策略)。
 
-        旧行为:点击后 sleep 2.5s 截一张,看到"无弹窗"立刻判失败并关客户端重试——
-        而实际发放要几十秒,于是每次都白跑一轮重试。
+        旧轮询策略会在时限内反复截图;现行策略:等 verify_wait_s → 截 1 张 → 判定 → 收。
         """
         taken = {"n": 0}
 
@@ -327,7 +327,7 @@ def __verify_mapping_case():
         original_grab = runner._grab_ready
         original_verify = runner.vision.verify
         runner._grab_ready = counting_grab
-        # 始终"没结论":旧逻辑只会截 1 张,新逻辑应在时限内复查多次
+        # 始终"没结论":策略规定只截 1 张,判定完就收,不再复查
         runner.vision.verify = lambda png: {
             "popup": None, "success": False, "failed": False, "confidence": 0.3,
         }
@@ -345,7 +345,7 @@ def __verify_mapping_case():
         failure = run({"popup": "failure", "keywords": ["领取失败", "知道了"], "confidence": 0.95})
         nothing = run({"popup": None, "success": False, "failed": False, "confidence": 0.4})
         claimed = run({"claimed": True, "keywords": ["明日再来"], "confidence": 0.9})
-        # 加载中:服务端还在发放(实测约 40 秒),不能当成失败去关客户端重试
+        # 加载中:到点仍未出结果,按现行策略应进入重试循环
         pending = run({"pending": True, "popup": "pending", "keywords": ["领取中"], "confidence": 0.9})
         pending_word = run({"popup": None, "keywords": ["处理中", "请稍候"], "confidence": 0.8})
         # 点过之后卡片消失了:领取已被消费,按已领收尾而不是失败
@@ -363,10 +363,11 @@ def __verify_mapping_case():
     assert pending == "retry", f"加载中超时后应进入重试,得到 {pending}"
     assert card_gone == "success", f"点后卡片消失应判成功,得到 {card_gone}"
 
-    # 点击前截图 → 点后等待结果 → 仍未出结果时,必须多截几张再收敛(旧逻辑只截一张)
-    delays = run_await_probe()
-    assert pending_word == "retry", f"加载词应判 pending,得到 {pending_word}"
-    assert delays["rounds"] >= 2, f"等待结果期间应复查多次,实际只截了 {delays['rounds']} 张"
+    # 点击后固定等待 → 只截一张校验图判定就收(不轮询)。计数含开头的定位截图:
+    # 定位 1 张 + 校验 1 张 = 2
+    delays = run_single_check()
+    assert pending_word == "retry", f"加载词应判 pending(进而重试),得到 {pending_word}"
+    assert delays["rounds"] == 2, f"定位+校验应各截 1 张,实际截了 {delays['rounds']} 张"
 
     # 前台校验不通过:跳过点击、计一次未成功(否则点击会落到用户当前窗口上)
     intercepted = len(clicks)
@@ -919,6 +920,112 @@ def __http_case():
     return "RPC / 静态资源 / SSE / 目录穿越防护全部正常"
 
 
+def __origin_guard_case():
+    """本地服务来源校验:跨站 Origin 与伪造 Host 必须被 403。
+
+    背景:面板 RPC 能退出程序、清空留档、改写配置,而跨站 POST 只要
+    Content-Type: text/plain 就能绕过 CORS 预检直发(HTTP 200 也拿不到,
+    但副作用已经发生);DNS rebinding 再配上不校验 Host,连明文 API Key
+    都能读走。这里逐条验证拦截与放行边界。
+    """
+    import http.client
+    import core.server as server_module
+    from core.events import EventBus
+    from urllib.parse import urlsplit
+
+    class Stub:
+        def get_state(self, payload=None):
+            return {"ok": True}
+
+    server = server_module.serve(Stub(), EventBus(), port=8771)
+    parsed = urlsplit(server.url)
+    host, port = parsed.hostname, parsed.port
+    local_host_header = f"{host}:{port}"
+
+    def raw_post(headers, body=b"{}"):
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("POST", "/api", body=body, headers=headers)
+            resp = conn.getresponse()
+            return resp.status, resp.read()
+        finally:
+            conn.close()
+
+    try:
+        valid_body = json.dumps({"method": "get_state", "args": [None]}).encode()
+        # 本机正常请求(urllib / curl 不带 Origin):放行
+        status, body = raw_post({"Content-Type": "application/json",
+                                 "Host": local_host_header}, valid_body)
+        assert status == 200 and json.loads(body).get("result", {}).get("ok"), (status, body)
+        # 同源面板(浏览器 fetch 对同源 POST 也会带 Origin):放行
+        status, body = raw_post({"Content-Type": "application/json",
+                                 "Host": local_host_header,
+                                 "Origin": f"http://{local_host_header}"}, valid_body)
+        assert status == 200 and json.loads(body).get("result", {}).get("ok"), (status, body)
+        # 恶意网页跨站 POST(text/plain 绕过预检):必须 403
+        status, _ = raw_post({"Content-Type": "text/plain",
+                              "Host": local_host_header,
+                              "Origin": "https://evil.example"})
+        assert status == 403, f"跨站 Origin 未被拒:{status}"
+        # DNS rebinding:evil.com 解析到 127.0.0.1,请求打到本机端口但 Host 是外部域名
+        status, _ = raw_post({"Content-Type": "text/plain", "Host": "evil.example"})
+        assert status == 403, f"rebinding Host 未被拒:{status}"
+        # 静态页同样受保护,防止被嵌进攻击者的源里
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("GET", "/", headers={"Host": "evil.example"})
+            assert conn.getresponse().status == 403, "静态页未拦截伪造 Host"
+        finally:
+            conn.close()
+    finally:
+        server.shutdown()
+    return "跨站 Origin 与伪造 Host 均 403;本机与同源请求放行"
+
+
+def __api_key_mask_case():
+    """API Key 不回传明文:读取只给尾号提示,留空保持、显式清除、重新输入替换。"""
+    import tempfile
+    from pathlib import Path
+
+    from core.api import Api
+    from core.config import ConfigStore
+    from core.events import EventBus
+    from core.runner import Runner
+    from core.scheduler import SlotScheduler
+    from core.storage import SessionStore
+    from core.vision import VisionClient
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="zcode-selftest-"))
+    cfg = ConfigStore(tmp_dir / "config.yaml")
+    cfg.patch({"vision": {"api_key": "sk-selftest1234abcd"}})
+    bus = EventBus()
+    store = SessionStore(tmp_dir / "shots")
+    vision = VisionClient(cfg)
+    runner = Runner(cfg, bus, store, vision)
+    api = Api(cfg, bus, store, vision, runner, SlotScheduler(cfg, lambda slot: None))
+
+    data = api.get_vision_config()
+    assert data["vision"]["api_key"] == "", "get_vision_config 回传了明文 Key"
+    assert data["vision"]["api_key_hint"] == "abcd", data["vision"]["api_key_hint"]
+
+    # 留空提交 = 不修改
+    api.save_vision_config({"vision": {"api_key": "", "model": "model-b"}})
+    assert (cfg.get("vision", "api_key") or "") == "sk-selftest1234abcd", "留空被误清"
+    assert cfg.get("vision", "model") == "model-b", "其余字段应正常保存"
+
+    # 重新输入 = 整体替换(容忍首尾空白);api_key_hint 不得落盘
+    result = api.save_vision_config({"vision": {"api_key": "  sk-new-key-9999  ", "api_key_hint": "9999"}})
+    assert (cfg.get("vision", "api_key") or "") == "sk-new-key-9999", "新 Key 未写入"
+    assert result["vision"]["api_key"] == "" and result["vision"]["api_key_hint"] == "9999"
+    assert "api_key_hint" not in (cfg.get("vision") or {}), "展示字段被写进配置"
+
+    # 显式清除(null)= 置空;has_key 随之为 False
+    api.save_vision_config({"vision": {"api_key": None}})
+    assert not (cfg.get("vision", "api_key") or "").strip(), "显式清除未生效"
+    assert api.get_vision_config()["vision"]["api_key_hint"] == ""
+    return "明文不下发;留空保持 / 替换 / 清除与尾号提示均正确"
+
+
 def __frozen_path_case():
     """冻结路径分流:打包后资源从 _MEIPASS 读、数据写到 exe 同级。
 
@@ -1133,11 +1240,10 @@ def __notify_webhook_live_case():
 
 
 def __no_card_case():
-    """卡片不在画面上时的收敛:复查后按已领收尾,而不是反复重开客户端。
+    """按用户策略:卡片不在 → 等 no_card_wait_s 复查一次;晚出现继续领,仍不在按重试循环。
 
-    事故背景:实测客户端上福利卡片经常整张不出现(当期已领完/活动结束),旧逻辑
-    一路判 retry → 关客户端重启 → 卡片还是不在 → 再重试。某场次因此空转 10 轮、
-    每轮都强杀一次客户端,最后被看门狗腰斩。
+    旧策略是复查两次后直接收敛为"当期无可领"、整场不再重试;现行策略改为与普通
+    失败一致:复查仍不在就进"关客户端 → 等间隔 → 重开"循环,由尝试次数兜底。
     """
     import tempfile
     from pathlib import Path
@@ -1153,7 +1259,7 @@ def __no_card_case():
     cfg = ConfigStore(tmp / "config.yaml")
     cfg.patch({
         "app": {"dry_run": False},
-        "retry": {"verify_delay_s": 0, "no_card_probe_s": 0.01, "no_card_probe_times": 2},
+        "retry": {"no_card_wait_s": 0},
         "vision": {"api_key": "selftest-fake-key"},
     })
     store = SessionStore(tmp / "shots")
@@ -1186,10 +1292,10 @@ def __no_card_case():
     import threading
     result, reason = runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)
 
-    assert result == "not_available", f"卡片不在时应收敛为无可领,得到 {result}({reason})"
+    assert result == "retry", f"复查仍无卡片应按重试处理,得到 {result}({reason})"
     assert not clicks, f"卡片不在时不该点击:{clicks}"
-    assert located["n"] >= 2, f"应先复查再下结论,实际只识别了 {located['n']} 次"
-    assert "不再重试" in reason, f"结论未说明不再重试:{reason}"
+    assert located["n"] == 2, f"应先原地复查一次再定,实际识别了 {located['n']} 次"
+    assert "复查" in reason, f"结论未说明已复查:{reason}"
 
     # 卡片只是晚渲染:复查时出现 → 应继续正常领取
     located["n"] = 0
@@ -1212,14 +1318,14 @@ def __no_card_case():
     result2, _ = runner._one_attempt(session2, attempt2, False, threading.Event(), cfg_dict)
     assert result2 == "success", f"卡片晚出现时应继续领取,得到 {result2}"
     assert len(clicks) == 1, f"卡片出现后应点击一次,实际 {len(clicks)} 次"
-    return "卡片不在时复查后收尾(不重开、不点击);晚渲染时能继续领取"
+    return "卡片不在:复查一次,晚出现继续领,仍缺失按重试循环(不点击)"
 
 
 def __verify_pending_case():
-    """回归:点击后界面停在加载动画上(实测约 40 秒)时,必须继续等而不是判失败。
+    """按用户策略:点击后固定等待 verify_wait_s 秒,到点截图判定一次。
 
-    事故背景:旧逻辑点击后只 sleep 2.5s 截一张图,看到"没有结果弹窗"就判未成功 →
-    关客户端重开。而实际发放要几十秒,于是每一轮都在同一处失败,永远领不到。
+    到点时仍在加载 → 按未成功进入重试循环(等待本身必须真实发生,不能瞬间跳过);
+    到点时已出成功弹窗 → 直接成功。全程只校验一次,不轮询。
     """
     import tempfile
     import threading
@@ -1237,8 +1343,7 @@ def __verify_pending_case():
     cfg = ConfigStore(tmp / "config.yaml")
     cfg.patch({
         "app": {"dry_run": False},
-        "retry": {"verify_delay_s": 0, "verify_timeout_s": 10, "verify_poll_s": 0.05,
-                  "no_card_probe_times": 0, "focus_settle_s": 0},
+        "retry": {"verify_wait_s": 1, "focus_settle_s": 0},
         "vision": {"api_key": "selftest-fake-key"},
     })
     store = SessionStore(tmp / "shots")
@@ -1266,46 +1371,41 @@ def __verify_pending_case():
     clicker_module.click_norm = lambda rect, box, humanize=False: clicks.append(box)
 
     try:
-        # 前几次"加载中"、之后才出成功弹窗:必须等到成功,不能半路判失败
-        rounds = {"n": 0}
-        frame_times = []
+        # 到点仍在加载:按未成功收尾进入重试循环;等待必须真实发生
+        checks = {"n": 0}
 
         def fake_verify(png):
-            rounds["n"] += 1
-            frame_times.append(time.time())
-            if rounds["n"] < 3:
-                return {"pending": True, "popup": "pending", "keywords": ["领取中"],
-                        "confidence": 0.9, "notes": "按钮在转圈"}
-            return {"popup": "success", "keywords": ["领取成功"], "confidence": 0.95}
+            checks["n"] += 1
+            return {"pending": True, "popup": "pending", "keywords": ["领取中"],
+                    "confidence": 0.9, "notes": "按钮在转圈"}
 
         runner.vision.verify = fake_verify
         session = store.begin("manual", {"time": None})
         attempt = store.begin_attempt(session, 1)
+        started = time.time()
         result, reason = runner._one_attempt(session, attempt, False, threading.Event(), cfg_dict)
-
-        assert result == "success", f"加载中后出结果应判成功,得到 {result}({reason})"
-        assert rounds["n"] >= 3, f"应复查到结果出现,实际只校验 {rounds['n']} 次"
+        elapsed = time.time() - started
+        assert result == "retry", f"到点仍在加载应按未成功重试,得到 {result}({reason})"
+        assert elapsed >= 1.0, f"点击后的固定等待应真实发生,实际只等了 {elapsed:.1f}s"
+        assert checks["n"] == 1, f"应只校验一次,实际 {checks['n']} 次"
         assert len(clicks) == 1, f"应只点击一次,实际 {len(clicks)} 次"
-        # 每张校验图都留档,面板可回放结果是怎么出来的
+        assert "加载" in reason, f"收尾原因未说明仍在加载:{reason}"
+        # 校验图留档,面板可回放这次判定
         saved = list((tmp / "shots" / session["id"]).glob("attempt-1-after*.png"))
-        assert len(saved) >= 3, f"校验截图未逐张留档,只有 {len(saved)} 张"
+        assert len(saved) == 1, f"校验截图应留档 1 张,实际 {len(saved)} 张"
 
-        # 全程加载中(始终没结论):到时限后收尾为失败,而不是无限等
-        rounds["n"] = 0
-        runner.vision.verify = lambda png: {"pending": True, "popup": "pending",
-                                            "keywords": ["领取中"], "confidence": 0.9}
+        # 到点已出成功弹窗:直接成功收尾
+        checks["n"] = 0
+        runner.vision.verify = lambda png: {"popup": "success", "keywords": ["领取成功"],
+                                            "confidence": 0.95}
         session2 = store.begin("manual", {"time": None})
         attempt2 = store.begin_attempt(session2, 1)
-        started = time.time()
-        result2, reason2 = runner._one_attempt(session2, attempt2, False, threading.Event(), cfg_dict)
-        elapsed = time.time() - started
-        assert result2 == "retry", f"始终加载中应在时限后收尾为未成功,得到 {result2}"
-        assert elapsed >= 1.0, f"应在时限内持续等待,实际只等了 {elapsed:.1f}s"
-        assert "加载中" in reason2 or "未拿到" in reason2, f"收尾原因未说明仍在加载:{reason2}"
+        result2, _ = runner._one_attempt(session2, attempt2, False, threading.Event(), cfg_dict)
+        assert result2 == "success", f"到点已出成功弹窗应判成功,得到 {result2}"
     finally:
         clicker_module.click_norm = real_click
 
-    return "加载中持续等待直到出结果(多张截图留档);始终无结论才按时限收尾"
+    return "点击后固定等待一次判定:仍在加载即重试,出结果即成功(不轮询)"
 
 
 def __weekly_case():
@@ -1361,7 +1461,7 @@ def __weekly_case():
     cfg = ConfigStore(tmp2 / "config.yaml")
     cfg.patch({"app": {"dry_run": False, "weekly_once": True},
                "vision": {"api_key": "selftest-fake-key"},   # 让流程走到视觉调用(视觉已被打桩)
-               "retry": {"watchdog_s": 30, "verify_delay_s": 0}})
+               "retry": {"watchdog_s": 30, "verify_wait_s": 0}})
     store = SessionStore(tmp2 / "shots")
     weekly = WeeklyStore(tmp2 / "weekly.json")
     runner = Runner(cfg, EventBus(), store, VisionClient(cfg), weekly=weekly)

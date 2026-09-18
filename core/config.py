@@ -87,15 +87,12 @@ DEFAULTS: dict = {
         "max_attempts": 5,
         "retry_gap_s": 5,
         "open_timeout_s": 30,
-        "verify_delay_s": 2.5,   # 点击后第一次校验前的等待(给结果弹窗留出冒头时间)
         "settle_s": 2.0,
         "focus_settle_s": 0.4,
         "app_ready_timeout_s": 20,     # 等待客户端界面渲染完成(加载期纯色不算锁屏)
         "verify_ready_timeout_s": 8,   # 单次校验截图等待界面就绪的上限
-        "verify_timeout_s": 90,        # 点击后等待结果收敛的总时长:领取常要几十秒才出结果
-        "verify_poll_s": 6,            # 未出结果时的复查间隔
-        "no_card_probe_times": 2,      # 没看到福利卡片时的复查次数(区分"晚渲染"与"当期没有")
-        "no_card_probe_s": 4,          # 卡片复查的间隔秒数
+        "verify_wait_s": 30,           # 点击后等待加载动画的秒数,到点截图判定一次
+        "no_card_wait_s": 5,           # 卡片不在画面上时,复查前等待的秒数
         "ready_poll_s": 1.0,           # 渲染等待的轮询间隔
         "uniform_ratio_max": 0.98,     # 单色占比高于此值视为"还没渲染出来"
         "user_idle_s": 1.0,            # 需连续多少秒无键鼠输入才动手(0=关闭该保护)
