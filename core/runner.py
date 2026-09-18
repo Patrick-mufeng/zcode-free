@@ -23,16 +23,19 @@ from core.events import EventBus
 from core.notify import notify
 from core.storage import SessionStore
 from core.vision import VisionClient
+from core.weekly import WeeklyStore
 
 STEPS = ["打开客户端", "识别按钮", "点击领取", "校验结果", "收尾"]
 
 
 class Runner:
-    def __init__(self, cfg: ConfigStore, bus: EventBus, store: SessionStore, vision: VisionClient):
+    def __init__(self, cfg: ConfigStore, bus: EventBus, store: SessionStore, vision: VisionClient,
+                 weekly: WeeklyStore | None = None):
         self.cfg = cfg
         self.bus = bus
         self.store = store
         self.vision = vision
+        self.weekly = weekly or WeeklyStore()
         self._lock = threading.Lock()
         self.current: dict | None = None
         self._client_pid: int | None = None
@@ -85,6 +88,13 @@ class Runner:
             slot["retry_gap_s"] if slot.get("retry_gap_s") is not None else retry_cfg["retry_gap_s"]
         )
         watchdog_s = float(retry_cfg.get("watchdog_s") or 150)
+
+        # 福利一周只有一次机会(周期以周五为起点)。本周期已经领到过,后面的场次再跑也
+        # 变不出福利,只会白开客户端、白调两次视觉 —— 直接收尾为「已领取,本场跳过」。
+        # 配置保持不动,下周五自动重新开始;手动试领不受此限(用户主动要求就该执行)。
+        skip_reason = self._weekly_skip_reason(trigger, slot, cfg)
+        if skip_reason:
+            return self._finish_skipped(trigger, slot, skip_reason)
 
         session = self.store.begin(trigger, slot)
         status, summary = "failed", ""
@@ -148,6 +158,10 @@ class Runner:
                 if result in ("success", "claimed"):
                     status, summary = "success", reason
                     keep_client = True
+                    # 记下本周期已领到:后续场次将跳过。演练不记,免得一次演练就把真机会"用掉"
+                    if not dry:
+                        self.weekly.mark_claimed(
+                            slot=slot.get("time") or "", source=trigger, when=None)
                     break
                 if result == "not_available":
                     # 当期没有可领的福利:重开客户端也变不出来,直接收尾(不刷失败、不反复重启)
@@ -206,6 +220,41 @@ class Runner:
             logger.info(f"本次领取结束:{status} — {summary}")
 
         return {"status": status, "summary": summary, "session_id": session["id"]}
+
+    # ---------- 每周一次机会 ----------
+
+    def _weekly_skip_reason(self, trigger: str, slot: dict, cfg: dict) -> str:
+        """该场次是否应当因为"本周已领到"而跳过;返回原因,不需要跳过则返回空串。"""
+        if not bool(cfg["app"].get("weekly_once", True)):
+            return ""
+        if trigger != "schedule":        # 手动/演练是用户主动要求,不受每周限制
+            return ""
+        if slot.get("ignore_weekly"):    # 单场可显式豁免(目前仅供测试)
+            return ""
+        state = self.weekly.state()
+        if not state["claimed"]:
+            return ""
+        when = state["claimed_at"] or "本周期早些时候"
+        src = "手动试领" if state["claimed_source"] == "manual" else (
+            f"{state['claimed_slot']} 场次" if state["claimed_slot"] else "定时领取"
+        )
+        return (f"本周期({state['label']})已于 {when} 通过{src}领取成功;"
+                "一周只有一次机会,本场按已领取跳过")
+
+    def _finish_skipped(self, trigger: str, slot: dict, reason: str) -> dict:
+        """跳过场次:只记一条状态,不碰客户端、不调模型、不发通知。"""
+        session = self.store.begin(trigger, slot)
+        self.store.finish(session, "skipped", reason)
+        logger.info(f"场次 {slot.get('time') or '手动'} 跳过:{reason}")
+        self.bus.publish("exec_start", {
+            "session_id": session["id"], "trigger": trigger,
+            "slot": slot.get("time"), "max_attempts": 0, "dry_run": False, "skipped": True,
+        })
+        self.bus.publish("session_end", {
+            "session_id": session["id"], "status": "skipped", "summary": reason,
+            "slot": slot.get("time"), "trigger": trigger,
+        })
+        return {"status": "skipped", "summary": reason, "session_id": session["id"]}
 
     # ---------- 单次尝试 ----------
 

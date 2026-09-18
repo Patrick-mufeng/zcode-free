@@ -90,6 +90,11 @@
 
         <div class="cards">
           <div class="card">
+            <div class="card-label">本周福利</div>
+            <div class="value" id="cardWeekly">--</div>
+            <div class="sub" id="cardWeeklySub">—</div>
+          </div>
+          <div class="card">
             <div class="card-label">下场时间</div>
             <div class="value" id="cardNext">--</div>
             <div class="sub" id="cardNextSub">未配置场次</div>
@@ -121,7 +126,7 @@
               <button class="btn solid" id="runOncePage" type="button">试领一次(完整流程)</button>
               <button class="btn" id="runDryPage" type="button">演练一次(不点击、不关客户端)</button>
             </div>
-            <p class="hint">完整流程:打开或复用 ZCode → 置顶窗口后截图 → 视觉识别领取按钮 → 点击 → 校验;未成功则关闭客户端,等 5 秒重开,最多 5 次。演练模式同样先置顶再截图识别,但不移动鼠标、不关闭客户端。</p>
+            <p class="hint">完整流程:打开或复用 ZCode → 置顶窗口后截图 → 视觉识别领取按钮 → 点击 → 等待结果(几十秒内反复确认);未成功则关闭客户端,等 5 秒重开,最多 5 次。演练模式同样先置顶再截图识别,但不移动鼠标、不关闭客户端。</p>
           </div>
 
           <div class="panel" id="setupPanel">
@@ -474,7 +479,7 @@
               <span>点右上「开始测试」会截一张 ZCode 窗口图,把模型找到的领取按钮用红框圈出来,并显示模型返回的 JSON。这一步只识别,不会点击任何东西。</span>
             </div>
             <div class="lp-steps">
-              <div class="lp-step"><i class="mono">01</i><span>先把客户端打开并停在福利页</span></div>
+              <div class="lp-step"><i class="mono">01</i><span>打开客户端(福利卡片在窗口左下角)</span></div>
               <div class="lp-step"><i class="mono">02</i><span>选「截取 ZCode 窗口」后开始测试</span></div>
               <div class="lp-step"><i class="mono">03</i><span>红框没圈住领取按钮,再调阈值与词表</span></div>
             </div>
@@ -488,7 +493,7 @@
               </div>
               <pre class="json" id="locateJson"></pre>
             </div>
-            <p class="hint">红框由模型返回的 button_box 换算而来。框画错了先确认客户端是否停在福利页,再调阈值与词表。</p>
+            <p class="hint">红框由模型返回的 button_box 换算而来。框画错了先确认左下角的福利卡片确实在画面上(卡片不在时不会有按钮),再调阈值与词表。</p>
           </div>
         </div>
 
@@ -650,6 +655,28 @@
             </div>
           </div>
           <p class="hint">点击后服务端要花几十秒发放,程序会在「等待领取结果上限」内反复截图确认(界面停在加载动画上时继续等,不算失败);单次尝试超时会中止本场并通知。</p>
+        </div>
+
+        <div class="panel">
+          <div class="section-head">
+            <span class="sec-idx">每周机会</span>
+            <span class="sec-note">福利一周只有一次,周期从周五算起</span>
+            <span class="spacer"></span>
+            <span class="muted" id="weeklyState">--</span>
+          </div>
+          <div class="settings-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+            <div class="field">
+              <label for="sWeeklyOnce">一周只领一次</label>
+              <label class="check"><input type="checkbox" id="sWeeklyOnce" /><span>本周领到后,剩余场次自动跳过(配置保留,下周五恢复)</span></label>
+            </div>
+            <div class="field">
+              <label>本周状态</label>
+              <div class="row">
+                <button class="btn" id="btnClearWeekly">清除本周已领记录</button>
+              </div>
+            </div>
+          </div>
+          <p class="hint">只在周五开机跑工具时最实用:周五成功后,周六到周四的场次不会再空跑(省下反复开客户端与两次视觉调用),下周五自动重新开始。手动「试领一次」不受此限制。</p>
         </div>
 
         <div class="dash-grid">

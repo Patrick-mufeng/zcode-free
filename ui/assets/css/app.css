@@ -537,8 +537,8 @@ main {
 }
 
 /* ============================== 7. 统计卡 ============================== */
-/* 首卡放倒计时,给宽一点;其余三等分,整行铺满 */
-.cards { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: var(--gap); }
+/* 首卡放本周机会,给宽一点;其余等分,整行铺满 */
+.cards { display: grid; grid-template-columns: 1.5fr 1.2fr 0.8fr 1.1fr 1fr; gap: var(--gap); }
 .card {
   background: var(--s1);
   border: 1px solid var(--hair);

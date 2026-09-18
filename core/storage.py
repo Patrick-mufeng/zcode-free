@@ -120,7 +120,8 @@ class SessionStore:
 
     def today_stats(self) -> dict:
         today = date.today().strftime("%Y-%m-%d")
-        stats = {"success": 0, "failed": 0, "need_manual": 0, "not_available": 0, "total": 0}
+        stats = {"success": 0, "failed": 0, "need_manual": 0, "not_available": 0,
+                 "skipped": 0, "total": 0}
         for item in self.list_sessions(limit=200):
             if not (item.get("started_at") or "").startswith(today):
                 continue

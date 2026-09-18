@@ -45,6 +45,7 @@
         success: { text: '成功', cls: 'ok' },
         claimed: { text: '已领取', cls: 'ok' },
         not_available: { text: '无可领福利', cls: '' },
+        skipped: { text: '已跳过', cls: '' },
         failed: { text: '失败', cls: 'fail' },
         need_manual: { text: '需人工', cls: 'fail' },
         aborted: { text: '已中止', cls: 'fail' },

@@ -292,6 +292,12 @@
       alertState = null;
       freshResult = null;
       clearTimeout(freshTimer);
+      // 本周已领到的跳过场次不碰客户端,不做"执行中"那套提示,免得看起来像在跑
+      if (event && event.skipped) {
+        execRunning = false;
+        refreshState();
+        return;
+      }
       execRunning = true;
       stepStatus = {};
       lastAttempt = 0;
@@ -354,6 +360,10 @@
         alertState = { type: 'manual', text: detail };
         showBanner((event.slot ? '[' + event.slot + '] ' : '') + '本次无需领取:' + detail, false);
         toast('本次无需领取');
+      } else if (event.status === 'skipped') {
+        // 本周已领到,剩余场次静默跳过:只在日志里留痕,不弹告警
+        alertState = null;
+        toast((event.slot ? '[' + event.slot + '] ' : '') + '本周已领取,本场跳过');
       } else if (event.status === 'need_manual') {
         alertState = { type: 'manual', text: detail };
         showBanner('需要人工处理:' + detail, true);

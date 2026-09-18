@@ -61,6 +61,9 @@ DEFAULTS: dict = {
         "restore_window_rect": True,
         "window_rect": [40, 40, 1240, 860],
         "dry_run": False,
+        # 福利一周只有一次机会(周期从周五算起)。本周期已领到后,后面的场次自动跳过,
+        # 配置保持不动,下周五自动恢复。关掉它则每个场次都照常执行。
+        "weekly_once": True,
     },
     "schedule": {
         "enabled": True,

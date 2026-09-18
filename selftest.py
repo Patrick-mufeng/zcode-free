@@ -55,6 +55,7 @@ def main() -> int:
     check("通知:真实 webhook 推送(未配置地址则跳过)", lambda: __notify_webhook_live_case())
     check("执行器:福利卡片缺失时收敛(不反复重开客户端)", lambda: __no_card_case())
     check("执行器:点击后加载中持续等待(不再提前判失败)", lambda: __verify_pending_case())
+    check("每周一次机会(周期从周五起 / 已领则跳过后续场次)", lambda: __weekly_case())
     check("测试识别接口(整屏,无 Key 时报错而不抛异常)", lambda: __test_locate_case())
     check("前端资源完整性(HTML / CSS / JS)", lambda: __ui_assets_case())
     check("动效与排版护栏(无自我触发 / 纯文字 / 无渐变阴影)", lambda: __motion_guard_case())
@@ -1304,6 +1305,146 @@ def __verify_pending_case():
         clicker_module.click_norm = real_click
 
     return "加载中持续等待直到出结果(多张截图留档);始终无结论才按时限收尾"
+
+
+def __weekly_case():
+    """每周一次机会:周期从周五算起;本周已领到后,后续场次跳过而不空跑。
+
+    背景:福利一周只有一次机会,而用户会在一天里配好几个候选场次。旧行为是每场都
+    照跑,第一场领到之后,后面的场次仍会白开客户端、白调两次视觉 API。
+    """
+    import tempfile
+    from datetime import date, timedelta
+    from pathlib import Path
+
+    from core.config import ConfigStore
+    from core.events import EventBus
+    from core.runner import Runner
+    from core.storage import SessionStore
+    from core.vision import VisionClient
+    from core.weekly import WeeklyStore, week_end_of, week_start_of
+
+    # ① 周期边界:周五开头,周四结尾
+    fri = date(2026, 9, 18)          # 周五
+    sat = fri + timedelta(days=1)
+    thu = fri + timedelta(days=6)    # 下个周四
+    nxt = fri + timedelta(days=7)    # 再下一个周五
+    assert fri.weekday() == 4 and thu.weekday() == 3
+    assert week_start_of(fri) == fri, f"周五应属于自己那一周:{week_start_of(fri)}"
+    assert week_start_of(sat) == fri, "周六应归入同周"
+    assert week_start_of(thu) == fri, "周四应归入同周"
+    assert week_end_of(fri) == thu, f"周期末尾应是周四:{week_end_of(fri)}"
+    assert week_start_of(nxt) == nxt, "下一个周五应开启新周期"
+    assert week_start_of(fri - timedelta(days=1)) == fri - timedelta(days=7), \
+        "周四(前一天)应属于上一周期,不能被算进本周"
+
+    # ② 状态读写:过期的周期记录不算数
+    tmp = Path(tempfile.mkdtemp(prefix="zcode-weekly-"))
+    ws = WeeklyStore(tmp / "weekly.json")
+    assert ws.claimed_this_week(fri) is False, "初始应为未领取"
+    ws.mark_claimed(slot="19:00", source="schedule", when=fri)
+    assert ws.claimed_this_week(fri) is True, "记录后应为已领取"
+    assert ws.claimed_this_week(sat) is True, "同一周期内(周六)仍算已领取"
+    assert ws.claimed_this_week(nxt) is False, "下一个周期应自动失效(周五重新开始)"
+    st = ws.state(fri)
+    assert st["claimed_slot"] == "19:00" and st["claimed_source"] == "schedule"
+    ws.clear()
+    assert ws.claimed_this_week(fri) is False, "清除后应回到未领取"
+
+    # ③ 坏文件不能让流程崩:当作未领取处理
+    (tmp / "weekly.json").write_text("{ 这不是 json", encoding="utf-8")
+    assert ws.claimed_this_week(fri) is False, "损坏的状态文件应按未领取处理"
+
+    # ④ 执行器:本周已领到后的场次必须跳过,且完全不碰客户端
+    tmp2 = Path(tempfile.mkdtemp(prefix="zcode-weekly-run-"))
+    cfg = ConfigStore(tmp2 / "config.yaml")
+    cfg.patch({"app": {"dry_run": False, "weekly_once": True},
+               "vision": {"api_key": "selftest-fake-key"},   # 让流程走到视觉调用(视觉已被打桩)
+               "retry": {"watchdog_s": 30, "verify_delay_s": 0}})
+    store = SessionStore(tmp2 / "shots")
+    weekly = WeeklyStore(tmp2 / "weekly.json")
+    runner = Runner(cfg, EventBus(), store, VisionClient(cfg), weekly=weekly)
+
+    touched = {"open": 0}
+
+    def fake_open(dry, cfg):
+        touched["open"] += 1
+        return {"hwnd": 1, "title": "FakeZCode", "rect": [40, 40, 1240, 860]}
+
+    runner._open_client = fake_open
+    runner._close_client = lambda dry: None
+    # 自检在自己的进程里跑,不能真去检测/抢占键鼠与前台
+    runner._wait_user_idle = lambda cfg, abort: False
+    runner._ensure_foreground = lambda win, cfg: True
+
+    # 本周未领 → 正常执行(识别被打桩放空,只跑 1 次尝试;这里只验证"没被跳过")
+    res1 = runner.run_session("schedule", {"time": "19:00", "attempts": 1, "retry_gap_s": 1})
+    assert res1["status"] != "skipped", f"本周未领时不该跳过,得到 {res1}"
+    assert touched["open"] > 0, "本周未领时应真的去开客户端"
+
+    # 标记本周已领 → 后续场次全部跳过
+    weekly.mark_claimed(slot="19:00", source="schedule")
+    touched["open"] = 0
+    res2 = runner.run_session("schedule", {"time": "20:00"})
+    assert res2["status"] == "skipped", f"本周已领后应跳过,得到 {res2}"
+    assert touched["open"] == 0, f"跳过的场次不该打开客户端(实际开了 {touched['open']} 次)"
+    assert "一周只有一次机会" in res2["summary"], f"跳过原因未说明每周限制:{res2['summary']}"
+    data = store.load(res2["session_id"])
+    assert data and data["status"] == "skipped", "跳过场次应留一条记录供面板显示"
+    assert not data.get("attempts"), "跳过的场次不该产生尝试记录"
+
+    # 手动试领不受每周限制(用户主动要求就该执行)。识别被打桩放空,会走重试,
+    # 所以只断言"确实动了客户端",而不是恰好一次。
+    touched["open"] = 0
+    res3 = runner.run_session("manual", {"attempts": 1, "retry_gap_s": 1})
+    assert res3["status"] != "skipped", f"手动试领不该被跳过,得到 {res3}"
+    assert touched["open"] > 0, "手动试领应真的去开客户端"
+
+    # 关掉「一周只领一次」则不再跳过
+    cfg.patch({"app": {"weekly_once": False}})
+    touched["open"] = 0
+    res4 = runner.run_session("schedule", {"time": "21:00", "attempts": 1, "retry_gap_s": 1})
+    assert res4["status"] != "skipped", f"关闭该功能后不该跳过,得到 {res4}"
+    assert touched["open"] > 0, "关闭该功能后应正常执行"
+
+    # ⑤ 领取成功后自动记账:下一次调度就该跳过
+    cfg.patch({"app": {"weekly_once": True}})
+    weekly.clear()
+    runner.vision.locate = lambda png: {
+        "button_found": True, "claimable": True, "card_visible": True,
+        "button_box": [0.089, 0.909, 0.106, 0.93], "button_label": "领取",
+        "confidence": 0.93, "scene": "welfare",
+    }
+    runner.vision.verify = lambda png: {"popup": "success", "keywords": ["领取成功"],
+                                        "confidence": 0.95}
+    from types import SimpleNamespace
+    shot = SimpleNamespace(png=b"x", width=1240, height=860, rect=(40, 40, 1240, 860),
+                           uniform_ratio=0.3, full_size=(1920, 1080))
+    runner._grab_ready = lambda win, rect, cfg, dry, label, timeout=None: (shot, None)
+    runner._position_window = lambda win, cfg, dry: tuple(win["rect"])
+    runner._wait_user_idle = lambda cfg, abort: False
+    runner._ensure_foreground = lambda win, cfg: True
+    runner._open_client = lambda dry, cfg: {"hwnd": 1, "title": "Fake", "rect": [40, 40, 1240, 860]}
+    import core.clicker as clicker_module
+    real_click = clicker_module.click_norm
+    clicker_module.click_norm = lambda rect, box, humanize=False: None
+    try:
+        ok = runner.run_session("schedule", {"time": "19:00"})
+    finally:
+        clicker_module.click_norm = real_click
+    assert ok["status"] == "success", f"这一场应领取成功,得到 {ok}"
+    assert weekly.claimed_this_week() is True, "领取成功后应自动记下本周已领"
+    after = runner.run_session("schedule", {"time": "20:00"})
+    assert after["status"] == "skipped", f"成功后的下一场应自动跳过,得到 {after}"
+
+    # ⑥ 演练不算真正领到,不该占掉机会
+    weekly.clear()
+    cfg.patch({"app": {"dry_run": True}})
+    runner.run_session("manual", {"time": None, "dry": True})
+    assert weekly.claimed_this_week() is False, "演练不应记账(否则一次演练就把机会用掉)"
+    cfg.patch({"app": {"dry_run": False}})
+
+    return "周期边界正确(周五开头);已领则跳过且不碰客户端;手动与演练不受限;成功后自动记账"
 
 
 if __name__ == "__main__":

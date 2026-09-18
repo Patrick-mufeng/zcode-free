@@ -17,6 +17,7 @@
     success: '成功', failed: '失败', need_manual: '需人工',
     aborted: '已中止', dry_run: '演练完成',
     not_available: '无需领取',
+    skipped: '本周已领取,跳过',
   };
 
   const nodes = {};

@@ -66,6 +66,9 @@ class Api:
             "zcode_path": cfg["app"].get("zcode_path") or "",
             "dry_run": bool(cfg["app"].get("dry_run")),
             "config_path": str(CONFIG_PATH),
+            # 每周一次机会的窗口状态:面板据此显示"本周已领取,后续场次将跳过"
+            "weekly": dict(self.runner.weekly.state(),
+                           enabled=bool(cfg["app"].get("weekly_once", True))),
         }
 
     def set_master(self, payload=None) -> dict:
@@ -357,6 +360,10 @@ class Api:
         if action == "shots":
             count = self.store.clear_all()
             return {"ok": True, "message": f"已清除 {count} 个场次的截图"}
+        if action == "weekly":
+            self.runner.weekly.clear()
+            self.bus.publish("state_change", {})
+            return {"ok": True, "message": "已清除本周领取状态,后续场次将正常执行"}
         if action == "logs":
             count = 0
             for log_file in LOG_DIR.glob("*.log"):

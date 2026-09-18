@@ -10,7 +10,7 @@
     'rAttempts', 'rGap', 'rOpenTimeout', 'rSettle', 'rFocusSettle',
     'rAppReady', 'rVerifyReady', 'rVerifyTimeout', 'rVerifyPoll',
     'rWatchdog', 'rUserIdle', 'rUserIdleWait',
-    'sKeepAwake', 'sNotifyDesktop', 'sWebhook', 'sKeepDays',
+    'sKeepAwake', 'sNotifyDesktop', 'sWebhook', 'sKeepDays', 'sWeeklyOnce',
   ];
 
   function numberOr(value, fallback) {
@@ -30,6 +30,7 @@
           numberOr($('sRectX').value, 40), numberOr($('sRectY').value, 40),
           numberOr($('sRectW').value, 1240), numberOr($('sRectH').value, 860),
         ],
+        weekly_once: $('sWeeklyOnce').checked,
       },
       retry: {
         max_attempts: Math.max(1, numberOr($('rAttempts').value, 5)),
@@ -63,6 +64,30 @@
     }
   }
 
+  /* 本周状态行:周期标签 + 是否已领(已领则说明剩下的场次会跳过) */
+  async function refreshWeekly() {
+    const box = $('weeklyState');
+    if (!box) return;
+    try {
+      const state = await window.API.call('get_state');
+      const w = (state && state.weekly) || {};
+      if (!w.enabled) {
+        box.textContent = '每周限制已关闭';
+        return;
+      }
+      const label = w.label || '';
+      if (w.claimed) {
+        const src = w.claimed_source === 'manual' ? '手动试领'
+          : (w.claimed_slot ? w.claimed_slot + ' 场次' : '定时领取');
+        box.textContent = `${label} 已领取(${src},${w.claimed_at || ''})· 剩余场次将跳过`;
+      } else {
+        box.textContent = `${label} 尚未领取`;
+      }
+    } catch (err) {
+      box.textContent = '';
+    }
+  }
+
   window.PAGES.settings = {
     init() {
       FIELDS.forEach((id) => $(id).addEventListener('change', save));
@@ -83,6 +108,14 @@
       });
 
       $('btnOpenDataDir').addEventListener('click', () => window.API.call('open_data_dir'));
+
+      $('btnClearWeekly').addEventListener('click', async () => {
+        if (!(await window.APP.confirm('确定清除本周已领记录吗?\n清除后,本周剩余的场次会照常执行(可能重复领取)。'))) return;
+        const res = await window.API.call('cleanup', { action: 'weekly' });
+        window.APP.toast((res && res.message) || '已清除', 'ok');
+        await refreshWeekly();
+        window.APP.refreshState();
+      });
 
       $('btnTestNotify').addEventListener('click', async () => {
         const box = $('notifyResult');
@@ -167,10 +200,12 @@
         $('rUserIdle').value = retry.user_idle_s != null ? retry.user_idle_s : 1;
         $('rUserIdleWait').value = retry.user_idle_wait_s != null ? retry.user_idle_wait_s : 20;
         $('sKeepAwake').checked = (data.schedule || {}).keep_awake !== false;
+        $('sWeeklyOnce').checked = (data.app || {}).weekly_once !== false;
         $('sNotifyDesktop').checked = (data.notify || {}).desktop !== false;
         $('sWebhook').value = (data.notify || {}).webhook_url || '';
         $('sKeepDays').value = (data.data || {}).keep_days != null ? data.data.keep_days : 7;
         $('configPathText').textContent = data.config_path || '';
+        await refreshWeekly();
       } catch (err) {
         window.APP.toast('读取设置失败:' + err.message, 'err');
       } finally {

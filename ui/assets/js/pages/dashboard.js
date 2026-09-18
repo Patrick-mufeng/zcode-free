@@ -50,6 +50,24 @@
       $('cardNextSub').textContent = next ? next.datetime : (state.slots_enabled ? '今天已无场次' : '未配置场次');
 
       // 数字卡片走显式滚动动画(只对纯数字生效),不再靠观察自身文字变化
+      // 本周福利:一周只有一次机会,这里显示窗口状态与是否已领取。
+      // 副标题是单行省略的,文案要短;完整原因在运行日志里。
+      const weekly = state.weekly || {};
+      const claimed = !!weekly.claimed;
+      $('cardWeekly').textContent = claimed ? '已领取' : '待领取';
+      $('cardWeekly').className = 'value ' + (claimed ? 'ok' : '');
+      if (!weekly.enabled) {
+        $('cardWeeklySub').textContent = '每周限制已关闭';
+      } else if (claimed) {
+        const src = weekly.claimed_source === 'manual' ? '手动'
+          : (weekly.claimed_slot || '定时');
+        $('cardWeeklySub').textContent = `${src}已领 · 剩余场次跳过`;
+        $('cardWeekly').title = `${weekly.label || ''} 已于 ${weekly.claimed_at || ''} 领取成功;一周只有一次机会,剩余场次将跳过`;
+      } else {
+        $('cardWeeklySub').textContent = `${weekly.label || ''}`;
+        $('cardWeekly').title = `${weekly.label || ''} 尚未领取,${state.slots_enabled || 0} 个场次待执行`;
+      }
+
       if (window.MOTION) window.MOTION.countTo($('cardSlots'), state.slots_total || 0);
       else $('cardSlots').textContent = String(state.slots_total || 0);
       $('cardSlotsSub').textContent = `启用 ${state.slots_enabled || 0} 个`;
@@ -57,10 +75,13 @@
       const today = state.today || {};
       const parts = [`✓${today.success || 0}`, `✗${today.failed || 0}`];
       if (today.need_manual) parts.push(`⚠${today.need_manual}`);
-      if (today.not_available) parts.push(`—${today.not_available}`);
+      if (today.skipped) parts.push(`↷${today.skipped}`);
       $('cardToday').textContent = (today.total || 0) ? parts.join('  ') : '-';
+      const notes = [];
+      if (today.not_available) notes.push(today.not_available + ' 场无需领取');
+      if (today.skipped) notes.push(today.skipped + ' 场已跳过');
       $('cardTodaySub').textContent = (today.total || 0)
-        ? `共 ${today.total} 场${today.not_available ? '(含 ' + today.not_available + ' 场无需领取)' : ''}`
+        ? `共 ${today.total} 场${notes.length ? '(' + notes.join('、') + ')' : ''}`
         : '暂无记录';
 
       $('cardState').textContent = state.running ? '执行中' : (state.master ? '待命' : '已关闭');
